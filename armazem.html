@@ -1,0 +1,1059 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TESTES — Preparação / Armazém — Batardas</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<link rel="icon" href="img/logo.png" type="image/png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<aside class="ambiente-testes" aria-label="Ambiente de testes">BATARDAS · TESTES — usar apenas dados fictícios</aside>
+<div class="layout-admin">
+<nav class="barra-lateral">
+    <div class="marca"><img class="logo" src="img/logo.png" alt="Batardas" style="cursor:pointer;" onclick="irParaInicio()"></div>
+    <button id="botaoMenuMobile" onclick="alternarMenuMobile()" aria-label="Menu"><i class="ti ti-menu-2" aria-hidden="true"></i></button>
+    <button class="nav-item activo" data-secao="picking"><i class="ti ti-clipboard-check" aria-hidden="true"></i> Picking</button>
+    <button class="nav-item" data-secao="embalamento"><i class="ti ti-package" aria-hidden="true"></i> Embalamento <span class="contador" id="contadorEmbalamento" style="display:none;"></span></button>
+    <button class="nav-item" data-secao="pedidos"><i class="ti ti-clipboard-list" aria-hidden="true"></i> Pedidos <span class="contador" id="contadorPedidos" style="display:none;"></span></button>
+    <button class="nav-item" data-secao="movimentos"><i class="ti ti-arrows-exchange" aria-hidden="true"></i> Movimentos de stock</button>
+    <button class="nav-item" data-secao="zonas"><i class="ti ti-map-pin" aria-hidden="true"></i> Stock &amp; Zonas</button>
+    <button class="nav-item" data-secao="inventario"><i class="ti ti-clipboard-list" aria-hidden="true"></i> Inventário <span class="contador" id="contadorInventario" style="display:none;"></span></button>
+    <button class="nav-item" data-secao="qualidade"><i class="ti ti-clipboard-check" aria-hidden="true"></i> Qualidade</button>
+</nav>
+
+<div class="conteudo-admin">
+<header>
+    <h1 id="tituloSecao">Picking</h1>
+    <div>
+        <span class="utilizador" id="nomeUtilizador"></span>
+        <span class="bloco-sino">
+            <button id="botaoSino" onclick="alternarPainelAlertas()" aria-label="Notificações"><i class="ti ti-bell" style="font-size:19px; vertical-align:-4px;" aria-hidden="true"></i><span id="badgeAlertasSino"></span></button>
+            <div id="painelAlertas"></div>
+        </span>
+        <button class="secundario" onclick="terminarSessao()">Sair</button>
+    </div>
+</header>
+
+<main>
+<section class="painel activo" data-secao="picking">
+
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:14px; margin-bottom:24px;">
+        <div class="cartao" style="margin-bottom:0; padding:16px;">
+            <p style="font-size:12px; color:var(--ink-suave); margin:0 0 4px; text-transform:uppercase; letter-spacing:.04em;">Para preparar</p>
+            <p style="font-size:26px; font-weight:600; margin:0;" id="kpiParaPreparar">—</p>
+        </div>
+        <div class="cartao" style="margin-bottom:0; padding:16px;">
+            <p style="font-size:12px; color:var(--ink-suave); margin:0 0 4px; text-transform:uppercase; letter-spacing:.04em;">Pedidos pendentes</p>
+            <p style="font-size:26px; font-weight:600; margin:0;" id="kpiPedidosPendentes">—</p>
+        </div>
+    </div>
+
+    <div class="cartao">
+        <h2>Para preparar (picking)</h2>
+        <table>
+            <thead><tr><th>Cliente</th><th>Lote a usar</th><th>Entrega</th><th>Acção</th></tr></thead>
+            <tbody id="corpoPreparacao"></tbody>
+        </table>
+    </div>
+
+    <div class="cartao">
+        <h2>Histórico recente</h2>
+        <table>
+            <thead><tr><th>Cliente</th><th>Estado</th></tr></thead>
+            <tbody id="corpoHistorico"></tbody>
+        </table>
+    </div>
+</section>
+
+<section class="painel" data-secao="embalamento">
+    <div class="cartao">
+        <h2>Plano de embalamento</h2>
+        <p style="font-size:13px; color:var(--ink-suave); margin-top:-8px;">
+            Planeia o que embalar num dia a partir de lotes já produzidos — exporta em PDF para a equipa saber o que fazer, mesmo sem entrar no site.
+        </p>
+        <div class="linha-form">
+            <input id="peData" type="date">
+            <button class="secundario" id="btnExportarPlanoEmbalamento"><i class="ti ti-file-download" style="font-size:14px; vertical-align:-2px; margin-right:4px;" aria-hidden="true"></i>Exportar PDF</button>
+        </div>
+        <div class="linha-form">
+            <div class="campo-pesquisa-artigo">
+                <input type="text" id="peArtigoTexto" placeholder="Pesquisar produto (código ou nome)..." autocomplete="off">
+                <input type="hidden" id="peArtigo">
+                <div id="peArtigoResultados" class="lista-sugestoes" style="display:none;"></div>
+            </div>
+            <select id="peLote" disabled><option value="">Escolhe o produto primeiro</option></select>
+        </div>
+        <div class="linha-form">
+            <input id="peQuantidade" type="number" min="0.01" step="0.01" placeholder="Quantidade a embalar">
+            <button id="btnAdicionarPlanoEmbalamento">Adicionar ao plano</button>
+        </div>
+        <table style="margin-top:16px;">
+            <thead><tr><th>Produto</th><th>Lote</th><th>Quantidade</th><th></th></tr></thead>
+            <tbody id="corpoPlanoEmbalamento"></tbody>
+        </table>
+    </div>
+
+    <div class="cartao">
+        <h2>Por embalar</h2>
+        <table>
+            <thead><tr><th>Cliente</th><th>Entrega</th><th>Acção</th></tr></thead>
+            <tbody id="corpoPorEmbalar"></tbody>
+        </table>
+    </div>
+
+    <div class="cartao" id="cartaoEmbalarEncomenda" style="display:none;">
+        <h2>A embalar: <span id="tituloEncomendaEmbalar"></span></h2>
+
+        <p style="font-size:13px; font-weight:600; margin:12px 0 6px;">Materiais de embalagem gastos</p>
+        <div class="linha-form">
+            <div class="campo-pesquisa-artigo">
+                <input type="text" id="emArtigoTexto" placeholder="Pesquisar material (caixa, filme...)..." autocomplete="off">
+                <input type="hidden" id="emArtigo">
+                <div id="emArtigoResultados" class="lista-sugestoes" style="display:none;"></div>
+            </div>
+            <input id="emQuantidade" type="number" min="0.01" step="0.01" placeholder="Quantidade">
+        </div>
+        <button class="secundario" id="btnAdicionarMaterialEmbalagem">Adicionar material</button>
+        <div id="listaMateriaisEmbalagem" style="margin-top:10px;"></div>
+
+        <p style="font-size:13px; font-weight:600; margin:20px 0 6px;">Quebras no embalamento (opcional)</p>
+        <p style="font-size:12px; color:var(--ink-suave); margin:-4px 0 8px;">Se algum produto se partiu/estragou ao embalar — sobe o custo médio do lote de origem, para reflectir a perda real.</p>
+        <div class="linha-form">
+            <select id="emLoteProducao"><option value="">Escolhe o lote de produto...</option></select>
+            <input id="emQuantidadeQuebra" type="number" min="0.01" step="0.01" placeholder="Quantidade perdida">
+        </div>
+        <div class="linha-form">
+            <input id="emMotivoQuebra" placeholder="Motivo (ex. caiu ao fechar a caixa)">
+            <button class="secundario" id="btnAdicionarQuebraEmbalagem">Registar quebra</button>
+        </div>
+        <div id="listaQuebrasEmbalagem" style="margin-top:10px;"></div>
+
+        <p id="erroEmbalamento" class="erro" style="margin-top:12px;"></p>
+        <button id="btnConcluirEmbalamento" style="margin-top:12px;">Dar embalamento como concluído</button>
+    </div>
+</section>
+
+<section class="painel" data-secao="pedidos" id="pedidos">
+    <div class="cartao">
+        <h2>Pedidos de armazém pendentes</h2>
+        <table>
+            <thead><tr><th>Artigo</th><th>Quantidade</th><th>Acção</th></tr></thead>
+            <tbody id="corpoPedidosPendentes"></tbody>
+        </table>
+    </div>
+</section>
+
+<section class="painel" data-secao="movimentos">
+    <div class="cartao">
+        <h2>Enviar movimentos do dia</h2>
+        <p style="font-size:13px; color:var(--ink-suave); margin-top:-8px;">
+            Não sai nenhum email sozinho — os teus movimentos vão-se juntando aqui, e só saem quando carregares neste botão, tudo junto num email só.
+        </p>
+        <p style="font-size:13px; margin:10px 0;"><span id="contadorMovimentosPendentesEnvio" style="font-weight:600;">—</span> por enviar</p>
+        <button id="btnEnviarMovimentosDia">Enviar movimentos do dia</button>
+        <p id="erroEnvioMovimentos" class="erro"></p>
+    </div>
+
+    <div class="cartao">
+        <h2>Registar movimento de stock</h2>
+        <div class="linha-form">
+            <select id="mTipo">
+                <option value="Entrada">Entrada</option>
+                <option value="Saída">Saída</option>
+                <option value="Transferência">Transferência</option>
+            </select>
+        </div>
+        <div class="linha-form">
+            <div class="campo-pesquisa-artigo">
+                <input type="text" id="mArtigoTexto" placeholder="Pesquisar artigo (código ou nome)..." autocomplete="off">
+                <input type="hidden" id="mArtigo">
+                <div id="mArtigoResultados" class="lista-sugestoes" style="display:none;"></div>
+            </div>
+            <select id="mLoteOrigem" disabled><option value="">Escolhe o artigo primeiro</option></select>
+        </div>
+        <div class="linha-form">
+            <select id="mUnidade">
+                <option value="un">Unidade</option>
+                <option value="kg">Kg</option>
+                <option value="l">Litro</option>
+                <option value="mil">Milheiro</option>
+                <option value="pack">Pack</option>
+                <option value="pack2">Pack 2</option>
+                <option value="pack4">Pack 4</option>
+                <option value="pack6">Pack 6</option>
+                <option value="caixa">Caixa</option>
+                <option value="palete">Palete</option>
+            </select>
+            <input id="mQuantidade" type="number" min="0.01" step="0.01" placeholder="Quantidade">
+        </div>
+        <div class="linha-form" id="linhaDestino" style="display:none;">
+            <div class="campo-pesquisa-artigo">
+                <input type="text" id="mArtigoTextoDestino" placeholder="Artigo de destino (pesquisar)..." autocomplete="off">
+                <input type="hidden" id="mArtigoDestino">
+                <div id="mArtigoDestinoResultados" class="lista-sugestoes" style="display:none;"></div>
+            </div>
+            <select id="mLoteDestino" disabled><option value="">Escolhe o artigo primeiro</option></select>
+        </div>
+        <div class="linha-form" id="linhaQuantidadeDestino" style="display:none;">
+            <input id="mQuantidadeDestino" type="number" min="0" step="0.01" placeholder="Quantidade no destino (se diferente)">
+        </div>
+        <div class="linha-form" id="linhaLocalizacoes" style="display:none;">
+            <select id="mLocalizacaoOrigem"><option value="">Zona de origem (opcional)</option></select>
+            <select id="mLocalizacaoDestino"><option value="">Zona de destino (opcional)</option></select>
+        </div>
+        <div class="linha-form">
+            <input id="mObservacoes" placeholder="Observações (opcional)">
+            <button id="btnMovimento"><i class="ti ti-device-floppy" style="font-size:14px; vertical-align:-2px; margin-right:4px;" aria-hidden="true"></i>Registar</button>
+        </div>
+        <p id="erroMovimento" class="erro"></p>
+    </div>
+</section>
+
+<section class="painel" data-secao="zonas">
+    <div class="cartao">
+        <h2>Zonas de armazém</h2>
+        <div class="linha-form">
+            <input id="zNome" placeholder="Nome da zona (ex. Câmara Fria, A3)">
+            <button id="btnCriarZona">Criar zona</button>
+        </div>
+        <p id="erroZona" class="erro"></p>
+        <div id="listaZonasExistentes" style="margin-top:12px; display:flex; flex-wrap:wrap; gap:8px;"></div>
+    </div>
+
+    <div class="cartao">
+        <h2>Stock por zona</h2>
+        <div class="linha-form">
+            <select id="szZona"><option value="">Todas as zonas</option></select>
+            <button class="secundario" id="btnExportarStockZona"><i class="ti ti-file-download" style="font-size:14px; vertical-align:-2px; margin-right:4px;" aria-hidden="true"></i>Exportar PDF</button>
+        </div>
+        <table style="margin-top:12px;">
+            <thead><tr><th>Artigo</th><th>Lote</th><th>Quantidade</th></tr></thead>
+            <tbody id="corpoStockZona"></tbody>
+        </table>
+    </div>
+
+    <div class="cartao">
+        <h2>Rastreabilidade por lote</h2>
+        <p style="font-size:13px; color:var(--ink-suave); margin-top:-8px;">
+            Escreve um número de lote para veres de onde veio e para onde foi.
+        </p>
+        <input id="rtLote" placeholder="Número do lote...">
+        <button id="btnPesquisarRastreio" class="secundario" style="margin-top:10px;">Pesquisar</button>
+        <div id="resultadoRastreio" style="margin-top:16px; font-size:13px;"></div>
+    </div>
+</section>
+
+<section class="painel" data-secao="inventario">
+    <div class="cartao">
+        <h2>Inventários por fazer</h2>
+        <table>
+            <thead><tr><th>Zona</th><th>Pedido em</th><th>Itens</th><th>Acção</th></tr></thead>
+            <tbody id="corpoInventariosPendentes"></tbody>
+        </table>
+    </div>
+
+    <div class="cartao" id="cartaoContagemInventario" style="display:none;">
+        <h2>A contar: <span id="tituloInventarioActual"></span></h2>
+        <div class="linha-form">
+            <button class="secundario" id="btnExportarPdfInventario"><i class="ti ti-file-download" style="font-size:14px; vertical-align:-2px; margin-right:4px;" aria-hidden="true"></i>Exportar PDF de apoio</button>
+        </div>
+        <table style="margin-top:12px;">
+            <thead><tr><th>Artigo</th><th>Lote</th><th>Esperado</th><th>Contado</th></tr></thead>
+            <tbody id="corpoItensInventario"></tbody>
+        </table>
+        <div class="linha-form" style="margin-top:12px;">
+            <div class="campo-pesquisa-artigo">
+                <input type="text" id="ivArtigoTexto" placeholder="Artigo encontrado mas não estava na lista..." autocomplete="off">
+                <input type="hidden" id="ivArtigo">
+                <div id="ivArtigoResultados" class="lista-sugestoes" style="display:none;"></div>
+            </div>
+        </div>
+        <div class="linha-form">
+            <input id="ivNovoLote" placeholder="Número do lote">
+            <input id="ivNovaQuantidade" type="number" min="0" step="0.01" placeholder="Quantidade encontrada">
+        </div>
+        <button class="secundario" id="btnAdicionarItemInventario">Adicionar à contagem</button>
+        <p id="erroInventario" class="erro" style="margin-top:12px;"></p>
+        <button id="btnConcluirInventario" style="margin-top:12px;">Dar contagem como concluída</button>
+    </div>
+</section>
+
+<section class="painel" data-secao="qualidade">
+    <div class="cartao" id="cartaoMinhasNc">
+        <h2>Não-conformidades atribuídas a mim</h2>
+        <p style="font-size:13px; color:var(--ink-suave); margin-top:-8px;">
+            Anexa provas e soluções (foto ou documento) directamente aqui — inclui a partir da câmara do telemóvel.
+        </p>
+        <div class="filtros" id="filtrosMinhasNc" style="display:none;"></div>
+        <div id="corpoMinhasNc"></div>
+    </div>
+</section>
+</main>
+</div>
+</div>
+
+<script src="js/supabaseClient.js"></script>
+<script>
+async function iniciar() {
+    const contexto = await exigirRole(["armazem", "admin"]);
+    if (!contexto) return;
+    renderizarCabecalhoUtilizador(contexto.perfil, contexto.session.user.id);
+    renderizarAcessosExtra(contexto.perfil);
+    await inicializarAlertas();
+    await carregar();
+    await activarPesquisaArtigo("mArtigoTexto", "mArtigo", "mArtigoResultados", (artigoId) => carregarLotesDoArtigo(artigoId, "mLoteOrigem"));
+    await activarPesquisaArtigo("mArtigoTextoDestino", "mArtigoDestino", "mArtigoDestinoResultados", (artigoId) => carregarLotesDoArtigo(artigoId, "mLoteDestino"));
+    await carregarPedidosPendentes();
+    await carregarPorEmbalar();
+    await activarPesquisaArtigo("emArtigoTexto", "emArtigo", "emArtigoResultados");
+    await activarPesquisaArtigo("peArtigoTexto", "peArtigo", "peArtigoResultados", (artigoId) => carregarLotesPaParaEmbalar(artigoId));
+    document.getElementById("peData").valueAsDate = new Date();
+    await carregarPlanoEmbalamentoDoDia();
+    await carregarListaZonas();
+    await carregarStockPorZona();
+    await carregarInventariosPendentes();
+    await actualizarContadorMovimentosPendentesEnvio();
+    await activarPesquisaArtigo("ivArtigoTexto", "ivArtigo", "ivArtigoResultados");
+
+    supabaseClient
+        .channel("encomendas-fernando")
+        .on("postgres_changes", { event: "*", schema: "public", table: "encomendas" }, carregar)
+        .subscribe();
+
+    supabaseClient
+        .channel("pedidos-fernando")
+        .on("postgres_changes", { event: "*", schema: "public", table: "pedidos_armazem" }, carregarPedidosPendentes)
+        .subscribe();
+
+    carregarMinhasNcPartilhado(contexto.session.user.id);
+}
+
+/** Popula o dropdown de lotes de UM artigo — chamado depois de o
+ *  escolheres na pesquisa, em vez de mostrar logo todos os lotes de
+ *  todos os artigos misturados. */
+async function carregarLotesDoArtigo(artigoId, idSelect) {
+    const select = document.getElementById(idSelect);
+    if (!artigoId) {
+        select.disabled = true;
+        select.innerHTML = `<option value="">Escolhe o artigo primeiro</option>`;
+        return;
+    }
+    const { data, error } = await supabaseClient
+        .from("lotes_artigo")
+        .select("lote_artigo_id, numero_lote, quantidade_atual, artigos(unidade)")
+        .eq("artigo_id", artigoId)
+        .order("numero_lote");
+    if (error) { console.error(error); return; }
+
+    select.disabled = false;
+    select.innerHTML = data.length
+        ? data.map((l) => `<option value="${l.lote_artigo_id}" data-unidade="${escaparHtml((l.artigos?.unidade || "un").toUpperCase())}">Lote ${escaparHtml(l.numero_lote)} (${l.quantidade_atual})</option>`).join("")
+        : `<option value="">Sem lotes deste artigo em stock</option>`;
+    if (idSelect === "mLoteOrigem") actualizarRotuloUnidade();
+}
+
+function actualizarRotuloUnidade() {
+    const loteSelect = document.getElementById("mLoteOrigem");
+    const opcaoEscolhida = loteSelect.options[loteSelect.selectedIndex];
+    const unidadeReal = opcaoEscolhida?.dataset.unidade || "UN";
+    document.getElementById("mUnidade").options[0].textContent = unidadeReal === "UN" ? "Unidade" : unidadeReal;
+}
+document.getElementById("mLoteOrigem").addEventListener("change", actualizarRotuloUnidade);
+
+async function carregarPedidosPendentes() {
+    const { data, error } = await supabaseClient
+        .from("pedidos_armazem")
+        .select("pedido_id, quantidade, unidade_movimentacao, artigos(designacao), lotes_artigo(numero_lote)")
+        .eq("estado", "Pendente")
+        .order("data_pedido", { ascending: true });
+    if (error) { console.error(error); return; }
+
+    const corpo = document.getElementById("corpoPedidosPendentes");
+    corpo.innerHTML = data.length ? "" :
+        `<tr><td colspan="3" style="text-align:center; color:var(--ink-suave);">Sem pedidos pendentes.</td></tr>`;
+    data.forEach((p) => {
+        const tr = document.createElement("tr");
+        const lote = p.lotes_artigo ? ` · lote ${escaparHtml(p.lotes_artigo.numero_lote)}` : "";
+        tr.innerHTML = `
+            <td data-rotulo="Artigo">${escaparHtml(p.artigos?.designacao ?? "—")}${lote}</td>
+            <td data-rotulo="Quantidade">${p.quantidade} ${escaparHtml(p.unidade_movimentacao)}</td>
+            <td data-rotulo="Acção"><button onclick="atenderPedido('${p.pedido_id}')"><i class="ti ti-check" style="font-size:14px; vertical-align:-2px; margin-right:4px;" aria-hidden="true"></i>Atendido</button></td>
+        `;
+        corpo.appendChild(tr);
+    });
+
+    document.getElementById("kpiPedidosPendentes").textContent = data.length;
+    const contador = document.getElementById("contadorPedidos");
+    if (data.length) { contador.textContent = data.length; contador.style.display = "inline-flex"; }
+    else { contador.style.display = "none"; }
+}
+
+async function atenderPedido(pedidoId) {
+    if (!confirm("Marcar este pedido como atendido? Não há forma de desfazer no site depois.")) return;
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const { error } = await supabaseClient
+        .from("pedidos_armazem")
+        .update({ estado: "Atendido", atendido_por: session.user.id, data_atendimento: new Date().toISOString() })
+        .eq("pedido_id", pedidoId);
+    if (error) { toast("Erro ao atender: " + error.message, "erro"); return; }
+    await supabaseClient.from("alertas").update({ lido: true }).eq("link_id", pedidoId).eq("tipo", "pedido_armazem").eq("destinatario_role", "armazem");
+    carregarPedidosPendentes();
+    actualizarContadorAlertas();
+    toast("Pedido marcado como atendido.", "sucesso");
+}
+
+document.getElementById("mTipo").addEventListener("change", (e) => {
+    const ehTransferencia = e.target.value === "Transferência";
+    document.getElementById("linhaDestino").style.display = ehTransferencia ? "grid" : "none";
+    document.getElementById("linhaQuantidadeDestino").style.display = ehTransferencia ? "grid" : "none";
+    document.getElementById("linhaLocalizacoes").style.display = ehTransferencia ? "grid" : "none";
+});
+
+document.getElementById("btnMovimento").addEventListener("click", async () => {
+    const erroEl = document.getElementById("erroMovimento");
+    erroEl.textContent = "";
+
+    const tipo = document.getElementById("mTipo").value;
+    const loteOrigem = document.getElementById("mLoteOrigem").value;
+    const unidade = document.getElementById("mUnidade").value;
+    const quantidade = Number(document.getElementById("mQuantidade").value);
+    const observacoes = document.getElementById("mObservacoes").value.trim();
+
+    if (!loteOrigem || !quantidade) {
+        erroEl.textContent = "Escolhe o artigo, o lote e a quantidade.";
+        return;
+    }
+
+    const registo = {
+        tipo,
+        lote_artigo_id: loteOrigem,
+        unidade_movimentacao: unidade,
+        quantidade,
+        observacoes: observacoes || null,
+    };
+
+    if (tipo === "Transferência") {
+        const loteDestino = document.getElementById("mLoteDestino").value;
+        const quantidadeDestino = document.getElementById("mQuantidadeDestino").value;
+        const localizacaoOrigem = document.getElementById("mLocalizacaoOrigem").value;
+        const localizacaoDestino = document.getElementById("mLocalizacaoDestino").value;
+        if (!loteDestino) {
+            erroEl.textContent = "Escolhe o artigo e o lote de destino para a transferência.";
+            return;
+        }
+        registo.lote_artigo_destino_id = loteDestino;
+        if (quantidadeDestino) registo.quantidade_destino = Number(quantidadeDestino);
+        if (localizacaoOrigem) registo.localizacao_origem_id = localizacaoOrigem;
+        if (localizacaoDestino) registo.localizacao_destino_id = localizacaoDestino;
+    }
+
+    const { error } = await supabaseClient.from("movimentos_stock").insert(registo);
+    if (error) { erroEl.textContent = "Erro ao registar: " + traduzirErro(error.message); return; }
+
+    document.getElementById("mQuantidade").value = "";
+    document.getElementById("mObservacoes").value = "";
+    document.getElementById("mArtigoTexto").value = "";
+    document.getElementById("mArtigo").value = "";
+    carregarLotesDoArtigo(null, "mLoteOrigem");
+    toast("Movimento registado — junta-se aos outros por enviar.", "sucesso");
+    actualizarContadorMovimentosPendentesEnvio();
+});
+
+async function carregar() {
+    const { data: paraPreparar, error: erro1 } = await supabaseClient
+        .from("encomendas")
+        .select("encomenda_id, data_entrega_pretendida, clientes(nome), encomenda_lote(quantidade_alocada, lotes_comerciais(numero_lote, artigos(designacao)))")
+        .eq("estado", "Em Preparação")
+        .order("data_entrega_pretendida", { ascending: true });
+
+    const corpoPrep = document.getElementById("corpoPreparacao");
+    if (erro1) { console.error(erro1); return; }
+    corpoPrep.innerHTML = paraPreparar.length ? "" :
+        `<tr><td colspan="4" style="text-align:center; color:var(--ink-suave);">Nada à espera de picking.</td></tr>`;
+    paraPreparar.forEach((enc) => {
+        const lotes = enc.encomenda_lote.length
+            ? enc.encomenda_lote.map((el) => `${escaparHtml(el.lotes_comerciais?.artigos?.designacao ?? "—")} · lote ${escaparHtml(el.lotes_comerciais?.numero_lote ?? "—")} (${el.quantidade_alocada})`).join("<br>")
+            : `<span style="color:var(--ink-suave);">Sem lote atribuído — confirma com o admin</span>`;
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td data-rotulo="Cliente">${escaparHtml(enc.clientes?.nome ?? "—")}</td>
+            <td data-rotulo="Lote a usar">${lotes}</td>
+            <td data-rotulo="Entrega">${formatarData(enc.data_entrega_pretendida)}</td>
+            <td data-rotulo="Acção"><button onclick="marcarPronta('${enc.encomenda_id}')"><i class="ti ti-check" style="font-size:14px; vertical-align:-2px; margin-right:4px;" aria-hidden="true"></i>Picking concluído</button></td>
+        `;
+        corpoPrep.appendChild(tr);
+    });
+    document.getElementById("kpiParaPreparar").textContent = paraPreparar.length;
+
+    const { data: historico, error: erro2 } = await supabaseClient
+        .from("encomendas")
+        .select("clientes(nome), estado")
+        .in("estado", ["Pronta", "Embalada", "Carregada"])
+        .order("data_hora_carregamento", { ascending: false })
+        .limit(10);
+
+    const corpoHist = document.getElementById("corpoHistorico");
+    if (erro2) { console.error(erro2); return; }
+    corpoHist.innerHTML = "";
+    historico.forEach((enc) => {
+        const classeEstado = CLASSE_ESTADO[enc.estado] ?? "Registada";
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td data-rotulo="Cliente">${escaparHtml(enc.clientes?.nome ?? "—")}</td>
+            <td data-rotulo="Estado"><span class="badge ${classeEstado}">${enc.estado}</span></td>
+        `;
+        corpoHist.appendChild(tr);
+    });
+}
+
+async function marcarPronta(encomendaId) {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const { error } = await supabaseClient
+        .from("encomendas")
+        .update({
+            estado: "Pronta",
+            data_conclusao_preparacao: new Date().toISOString(),
+            preparado_por: session.user.id,
+        })
+        .eq("encomenda_id", encomendaId);
+    if (error) { toast("Erro ao actualizar: " + error.message, "erro"); return; }
+    carregar();
+    toast("Picking concluído — passa para embalamento.", "sucesso");
+}
+
+const TITULOS_SECAO = { picking: "Picking", embalamento: "Embalamento", pedidos: "Pedidos de armazém", movimentos: "Movimentos de stock", zonas: "Stock & Zonas", inventario: "Inventário", qualidade: "Qualidade" };
+
+function mudarSecao(secao) {
+    document.querySelectorAll(".nav-item").forEach((btn) => btn.classList.toggle("activo", btn.dataset.secao === secao));
+    document.querySelectorAll(".painel").forEach((p) => p.classList.toggle("activo", p.dataset.secao === secao));
+    document.getElementById("tituloSecao").textContent = TITULOS_SECAO[secao] ?? "Picking";
+    localStorage.setItem("batardas_secao_fernando", secao);
+}
+document.querySelectorAll(".nav-item").forEach((btn) => {
+    btn.addEventListener("click", () => mudarSecao(btn.dataset.secao));
+});
+mudarSecao(localStorage.getItem("batardas_secao_fernando") ?? "picking");
+
+// --- Zonas de armazém --------------------------------------------------
+async function carregarListaZonas() {
+    const { data } = await supabaseClient.from("localizacoes").select("localizacao_id, nome").order("nome");
+    const lista = document.getElementById("listaZonasExistentes");
+    lista.innerHTML = (data ?? []).length ? "" : `<p style="font-size:13px; color:var(--ink-suave);">Ainda não há zonas criadas.</p>`;
+    (data ?? []).forEach((z) => {
+        const span = document.createElement("span");
+        span.className = "badge Registada";
+        span.textContent = z.nome;
+        lista.appendChild(span);
+    });
+    // Reaproveita a mesma lista para os selects de movimento e de filtro
+    // de stock por zona.
+    const opcoesMovimento = `<option value="">— nenhuma —</option>` + (data ?? []).map((z) => `<option value="${z.localizacao_id}">${escaparHtml(z.nome)}</option>`).join("");
+    document.getElementById("mLocalizacaoOrigem").innerHTML = opcoesMovimento;
+    document.getElementById("mLocalizacaoDestino").innerHTML = opcoesMovimento;
+    document.getElementById("szZona").innerHTML = `<option value="">Todas as zonas</option>` + (data ?? []).map((z) => `<option value="${z.localizacao_id}">${escaparHtml(z.nome)}</option>`).join("");
+}
+
+document.getElementById("btnCriarZona").addEventListener("click", async () => {
+    const erroEl = document.getElementById("erroZona");
+    erroEl.textContent = "";
+    const nome = document.getElementById("zNome").value.trim();
+    if (!nome) { erroEl.textContent = "Escreve o nome da zona."; return; }
+
+    const { error } = await supabaseClient.from("localizacoes").insert({ nome });
+    if (error) { erroEl.textContent = traduzirErro(error.message); return; }
+    document.getElementById("zNome").value = "";
+    toast("Zona criada.", "sucesso");
+    carregarListaZonas();
+});
+
+// --- Stock por zona ------------------------------------------------------
+let ultimoStockPorZona = [];
+
+async function carregarStockPorZona() {
+    const { data, error } = await supabaseClient
+        .from("lotes_artigo")
+        .select("numero_lote, quantidade_atual, localizacao_id, artigos(designacao, unidade), localizacoes(nome)")
+        .order("numero_lote");
+    if (error) { console.error(error); return; }
+    ultimoStockPorZona = data ?? [];
+    renderizarStockPorZona();
+}
+
+function renderizarStockPorZona() {
+    const zonaFiltro = document.getElementById("szZona").value;
+    const linhas = zonaFiltro ? ultimoStockPorZona.filter((l) => l.localizacao_id === zonaFiltro) : ultimoStockPorZona;
+
+    const corpo = document.getElementById("corpoStockZona");
+    corpo.innerHTML = linhas.length ? "" : `<tr><td colspan="3" style="text-align:center; color:var(--ink-suave);">Sem stock a mostrar.</td></tr>`;
+    linhas.forEach((l) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td data-rotulo="Artigo">${escaparHtml(l.artigos?.designacao ?? "—")}${l.localizacoes ? `<br><span style="font-size:12px; color:var(--ink-suave);">${escaparHtml(l.localizacoes.nome)}</span>` : ""}</td>
+            <td data-rotulo="Lote" class="mono">${escaparHtml(l.numero_lote)}</td>
+            <td data-rotulo="Quantidade">${l.quantidade_atual} ${escaparHtml((l.artigos?.unidade ?? "un").toUpperCase())}</td>
+        `;
+        corpo.appendChild(tr);
+    });
+}
+document.getElementById("szZona").addEventListener("change", renderizarStockPorZona);
+
+document.getElementById("btnExportarStockZona").addEventListener("click", async () => {
+    const zonaFiltro = document.getElementById("szZona").value;
+    const linhas = zonaFiltro ? ultimoStockPorZona.filter((l) => l.localizacao_id === zonaFiltro) : ultimoStockPorZona;
+    if (!linhas.length) { toast("Sem stock para exportar.", "erro"); return; }
+
+    const nomeZona = zonaFiltro ? document.getElementById("szZona").selectedOptions[0].textContent : "todas as zonas";
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const startY = await iniciarPdfComMarca(doc, "Stock por zona", `${nomeZona} · Gerado em ${new Date().toLocaleString("pt-PT")}`);
+
+    doc.autoTable({
+        startY,
+        head: [["Zona", "Artigo", "Lote", "Quantidade"]],
+        body: linhas.map((l) => [l.localizacoes?.nome ?? "—", l.artigos?.designacao ?? "—", l.numero_lote, `${l.quantidade_atual} ${(l.artigos?.unidade ?? "un").toUpperCase()}`]),
+        styles: { fontSize: 10, cellPadding: 3 },
+        headStyles: ESTILO_CABECALHO_TABELA_PDF,
+    });
+
+    doc.save(`stock_por_zona_${new Date().toISOString().slice(0, 10)}.pdf`);
+});
+
+// --- Rastreabilidade por lote (igual ao do admin) -------------------------
+document.getElementById("btnPesquisarRastreio").addEventListener("click", async () => {
+    const numeroLote = document.getElementById("rtLote").value.trim();
+    const resultadoEl = document.getElementById("resultadoRastreio");
+    if (!numeroLote) { resultadoEl.textContent = "Escreve um número de lote."; return; }
+    resultadoEl.textContent = "A procurar...";
+
+    let html = "";
+
+    const { data: producoes } = await supabaseClient
+        .from("lotes_producao")
+        .select("lote_id, produto, data_producao, quantidade_produzida, quebras")
+        .eq("numero_lote", numeroLote);
+
+    for (const producao of producoes ?? []) {
+        const { data: consumos } = await supabaseClient
+            .from("consumo_lotes")
+            .select("quantidade, lotes_artigo(numero_lote, artigos(designacao))")
+            .eq("lote_producao_id", producao.lote_id);
+        html += `<p style="font-weight:600; margin-top:12px;">Produção "${escaparHtml(producao.produto)}" (${producao.quantidade_produzida} produzidas${producao.quebras > 0 ? `, ${producao.quebras} quebras` : ""}) em ${formatarData(producao.data_producao)}</p>`;
+        html += consumos?.length
+            ? `<p style="color:var(--ink-suave); margin:2px 0 6px;">Matérias-primas/intermédios usados:</p><ul style="margin:0 0 8px 18px;">${consumos.map((c) => `<li>${escaparHtml(c.lotes_artigo?.artigos?.designacao ?? "—")} · lote ${escaparHtml(c.lotes_artigo?.numero_lote ?? "—")} — ${c.quantidade}</li>`).join("")}</ul>`
+            : `<p style="color:var(--ink-suave);">Sem consumo registado.</p>`;
+    }
+
+    const { data: lotesArtigo } = await supabaseClient
+        .from("lotes_artigo")
+        .select("lote_artigo_id, quantidade_atual, artigos(designacao)")
+        .eq("numero_lote", numeroLote);
+
+    for (const lote of lotesArtigo ?? []) {
+        const { data: usos } = await supabaseClient
+            .from("consumo_lotes")
+            .select("quantidade, lotes_producao(produto, numero_lote, data_producao)")
+            .eq("lote_artigo_consumido_id", lote.lote_artigo_id);
+        html += `<p style="font-weight:600; margin-top:12px;">Lote de "${escaparHtml(lote.artigos?.designacao ?? "—")}" (${lote.quantidade_atual} ainda em stock)</p>`;
+        html += usos?.length
+            ? `<p style="color:var(--ink-suave); margin:2px 0 6px;">Usado nestas produções:</p><ul style="margin:0 0 8px 18px;">${usos.map((u) => `<li>${escaparHtml(u.lotes_producao?.produto ?? "—")} · lote ${escaparHtml(u.lotes_producao?.numero_lote ?? "—")} em ${formatarData(u.lotes_producao?.data_producao)} — ${u.quantidade}</li>`).join("")}</ul>`
+            : `<p style="color:var(--ink-suave);">Ainda não foi usado em nenhuma produção.</p>`;
+    }
+
+    if (!producoes?.length && !lotesArtigo?.length) {
+        html = `<p style="color:var(--ink-suave);">Nenhum lote encontrado com esse número.</p>`;
+    }
+    resultadoEl.innerHTML = html;
+});
+
+// --- Inventário ------------------------------------------------------------
+let inventarioActualId = null;
+let itensInventarioActual = [];
+
+async function carregarInventariosPendentes() {
+    const { data, error } = await supabaseClient
+        .from("inventarios")
+        .select("id, pedido_em, localizacoes(nome), inventario_itens(id)")
+        .eq("estado", "Em curso")
+        .order("pedido_em", { ascending: true });
+    if (error) { console.error(error); return; }
+
+    const corpo = document.getElementById("corpoInventariosPendentes");
+    corpo.innerHTML = data.length ? "" : `<tr><td colspan="4" style="text-align:center; color:var(--ink-suave);">Sem inventários pendentes.</td></tr>`;
+    data.forEach((inv) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td data-rotulo="Zona">${escaparHtml(inv.localizacoes?.nome ?? "—")}</td>
+            <td data-rotulo="Pedido em">${formatarData(inv.pedido_em)}</td>
+            <td data-rotulo="Itens">${inv.inventario_itens?.length ?? 0}</td>
+            <td data-rotulo="Acção"><button onclick="abrirContagemInventario('${inv.id}', '${escaparHtml(inv.localizacoes?.nome ?? "—")}')">Contar</button></td>
+        `;
+        corpo.appendChild(tr);
+    });
+
+    const contador = document.getElementById("contadorInventario");
+    if (data.length) { contador.textContent = data.length; contador.style.display = "inline-flex"; }
+    else { contador.style.display = "none"; }
+}
+
+async function abrirContagemInventario(inventarioId, nomeZona) {
+    inventarioActualId = inventarioId;
+    document.getElementById("tituloInventarioActual").textContent = nomeZona;
+    document.getElementById("cartaoContagemInventario").style.display = "block";
+    await carregarItensInventario();
+    document.getElementById("cartaoContagemInventario").scrollIntoView({ behavior: "smooth" });
+}
+
+async function carregarItensInventario() {
+    const { data, error } = await supabaseClient
+        .from("inventario_itens")
+        .select("id, numero_lote, quantidade_esperada, quantidade_contada, contado, artigos(designacao, unidade)")
+        .eq("inventario_id", inventarioActualId)
+        .order("numero_lote");
+    if (error) { console.error(error); return; }
+    itensInventarioActual = data ?? [];
+    renderizarItensInventario();
+}
+
+function renderizarItensInventario() {
+    const corpo = document.getElementById("corpoItensInventario");
+    corpo.innerHTML = itensInventarioActual.length ? "" : `<tr><td colspan="4" style="text-align:center; color:var(--ink-suave);">Sem itens.</td></tr>`;
+    itensInventarioActual.forEach((item) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td data-rotulo="Artigo">${escaparHtml(item.artigos?.designacao ?? "—")}</td>
+            <td data-rotulo="Lote" class="mono">${escaparHtml(item.numero_lote)}</td>
+            <td data-rotulo="Esperado">${item.quantidade_esperada} ${escaparHtml((item.artigos?.unidade ?? "un").toUpperCase())}</td>
+            <td data-rotulo="Contado"><input type="number" min="0" step="0.01" value="${item.quantidade_contada ?? ""}" placeholder="Escreve 0 se estiver mesmo vazio" data-id="${item.id}" style="width:120px;"></td>
+        `;
+        tr.querySelector("input").addEventListener("change", async (e) => {
+            const valor = e.target.value === "" ? null : Number(e.target.value);
+            const { error } = await supabaseClient.from("inventario_itens").update({ quantidade_contada: valor, contado: valor !== null }).eq("id", item.id);
+            if (error) {
+                toast("A contagem NÃO ficou gravada: " + traduzirErro(error.message), "erro");
+                e.target.style.borderColor = "var(--perigo)";
+            } else {
+                e.target.style.borderColor = "";
+            }
+        });
+        corpo.appendChild(tr);
+    });
+}
+
+document.getElementById("btnAdicionarItemInventario").addEventListener("click", async () => {
+    const erroEl = document.getElementById("erroInventario");
+    erroEl.textContent = "";
+    const artigoId = document.getElementById("ivArtigo").value;
+    const numeroLote = document.getElementById("ivNovoLote").value.trim();
+    const quantidade = Number(document.getElementById("ivNovaQuantidade").value);
+
+    if (!artigoId || !numeroLote || !quantidade) { erroEl.textContent = "Preenche artigo, lote e quantidade."; return; }
+
+    const { error } = await supabaseClient.from("inventario_itens").insert({
+        inventario_id: inventarioActualId, artigo_id: artigoId, numero_lote: numeroLote,
+        quantidade_esperada: 0, quantidade_contada: quantidade, contado: true,
+    });
+    if (error) { erroEl.textContent = traduzirErro(error.message); return; }
+
+    document.getElementById("ivArtigoTexto").value = "";
+    document.getElementById("ivArtigo").value = "";
+    document.getElementById("ivNovoLote").value = "";
+    document.getElementById("ivNovaQuantidade").value = "";
+    toast("Item acrescentado à contagem.", "sucesso");
+    carregarItensInventario();
+});
+
+document.getElementById("btnExportarPdfInventario").addEventListener("click", async () => {
+    if (!itensInventarioActual.length) { toast("Sem itens para exportar.", "erro"); return; }
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const startY = await iniciarPdfComMarca(doc, "Apoio à contagem de inventário", `Zona: ${document.getElementById("tituloInventarioActual").textContent} · Gerado em ${new Date().toLocaleString("pt-PT")}`);
+
+    doc.autoTable({
+        startY,
+        head: [["Artigo", "Lote", "Esperado", "Encontrado (preencher à mão)"]],
+        body: itensInventarioActual.map((i) => [i.artigos?.designacao ?? "—", i.numero_lote, `${i.quantidade_esperada} ${(i.artigos?.unidade ?? "un").toUpperCase()}`, ""]),
+        styles: { fontSize: 10, cellPadding: 4 },
+        headStyles: ESTILO_CABECALHO_TABELA_PDF,
+    });
+
+    doc.save(`inventario_apoio_${new Date().toISOString().slice(0, 10)}.pdf`);
+});
+
+document.getElementById("btnConcluirInventario").addEventListener("click", async () => {
+    const naoContados = itensInventarioActual.filter((i) => !i.contado);
+    if (naoContados.length && !confirm(`${naoContados.length} item(ns) ainda sem contagem escrita. Confirmas que queres concluir mesmo assim?`)) return;
+
+    const { error } = await supabaseClient.from("inventarios")
+        .update({ estado: "Concluído pelo armazém", concluido_em: new Date().toISOString() })
+        .eq("id", inventarioActualId);
+    if (error) { toast("Erro: " + error.message, "erro"); return; }
+
+    toast("Inventário concluído — o admin foi avisado para rever.", "sucesso");
+    document.getElementById("cartaoContagemInventario").style.display = "none";
+    inventarioActualId = null;
+    carregarInventariosPendentes();
+    actualizarContadorAlertas();
+});
+
+// --- Embalamento ------------------------------------------------------------
+let encomendaEmbalarId = null;
+let materiaisEmbalagemActual = [];
+let quebrasEmbalagemActual = [];
+
+// --- Plano de embalamento --------------------------------------------------
+let itensPlanoEmbalamento = [];
+
+async function carregarLotesPaParaEmbalar(artigoId) {
+    const select = document.getElementById("peLote");
+    if (!artigoId) {
+        select.disabled = true;
+        select.innerHTML = `<option value="">Escolhe o produto primeiro</option>`;
+        return;
+    }
+    const { data, error } = await supabaseClient
+        .from("lotes_producao")
+        .select("lote_id, numero_lote, quantidade_produzida")
+        .eq("artigo_id", artigoId)
+        .gt("quantidade_produzida", 0)
+        .order("data_producao", { ascending: true });
+    if (error) { console.error(error); return; }
+
+    select.disabled = false;
+    select.innerHTML = data.length
+        ? data.map((l) => `<option value="${l.lote_id}">${escaparHtml(l.numero_lote)} (${l.quantidade_produzida} disponíveis)</option>`).join("")
+        : `<option value="">Sem lotes com stock deste produto</option>`;
+}
+
+document.getElementById("btnAdicionarPlanoEmbalamento").addEventListener("click", async () => {
+    const loteId = document.getElementById("peLote").value;
+    const loteTexto = document.getElementById("peLote").selectedOptions[0]?.textContent;
+    const nomeProduto = document.getElementById("peArtigoTexto").value.trim();
+    const quantidade = Number(document.getElementById("peQuantidade").value);
+    const dataPlano = document.getElementById("peData").value;
+
+    if (!loteId || !quantidade || !dataPlano) { toast("Escolhe o produto, o lote, a quantidade e a data.", "erro"); return; }
+
+    const { error } = await supabaseClient.from("plano_embalamento").insert({
+        lote_producao_id: loteId, quantidade, data_planeada: dataPlano,
+    });
+    if (error) { toast("Erro ao adicionar: " + traduzirErro(error.message), "erro"); return; }
+
+    toast("Adicionado ao plano.", "sucesso");
+    document.getElementById("peArtigoTexto").value = "";
+    document.getElementById("peArtigo").value = "";
+    document.getElementById("peQuantidade").value = "";
+    carregarLotesPaParaEmbalar(null);
+    carregarPlanoEmbalamentoDoDia();
+});
+
+async function carregarPlanoEmbalamentoDoDia() {
+    const dataPlano = document.getElementById("peData").value;
+    if (!dataPlano) return;
+    const { data, error } = await supabaseClient
+        .from("plano_embalamento")
+        .select("id, quantidade, lotes_producao(numero_lote, produto)")
+        .eq("data_planeada", dataPlano)
+        .order("criado_em", { ascending: true });
+    if (error) { console.error(error); return; }
+
+    itensPlanoEmbalamento = data ?? [];
+    const corpo = document.getElementById("corpoPlanoEmbalamento");
+    corpo.innerHTML = data.length ? "" : `<tr><td colspan="4" style="text-align:center; color:var(--ink-suave);">Nada planeado para este dia.</td></tr>`;
+    data.forEach((item) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td data-rotulo="Produto">${escaparHtml(item.lotes_producao?.produto ?? "—")}</td>
+            <td data-rotulo="Lote" class="mono">${escaparHtml(item.lotes_producao?.numero_lote ?? "—")}</td>
+            <td data-rotulo="Quantidade">${item.quantidade}</td>
+            <td data-rotulo=""><button class="secundario" data-id="${item.id}" style="padding:4px 10px; font-size:12px;">Remover</button></td>
+        `;
+        tr.querySelector("button").addEventListener("click", () => removerDoPlanoEmbalamento(item.id));
+        corpo.appendChild(tr);
+    });
+}
+
+async function removerDoPlanoEmbalamento(id) {
+    const { error } = await supabaseClient.from("plano_embalamento").delete().eq("id", id);
+    if (error) { toast("Erro ao remover: " + traduzirErro(error.message), "erro"); return; }
+    carregarPlanoEmbalamentoDoDia();
+}
+
+document.getElementById("peData").addEventListener("change", carregarPlanoEmbalamentoDoDia);
+
+document.getElementById("btnExportarPlanoEmbalamento").addEventListener("click", async () => {
+    if (!itensPlanoEmbalamento.length) { toast("Nada planeado para exportar.", "erro"); return; }
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const dataPlano = document.getElementById("peData").value;
+    const startY = await iniciarPdfComMarca(doc, "Plano de embalamento", `Dia ${formatarData(dataPlano)} · Gerado em ${new Date().toLocaleString("pt-PT")}`);
+
+    doc.autoTable({
+        startY,
+        head: [["Produto", "Lote", "Quantidade"]],
+        body: itensPlanoEmbalamento.map((i) => [i.lotes_producao?.produto ?? "—", i.lotes_producao?.numero_lote ?? "—", `${i.quantidade}`]),
+        styles: { fontSize: 11, cellPadding: 4 },
+        headStyles: ESTILO_CABECALHO_TABELA_PDF,
+    });
+
+    doc.save(`plano_embalamento_${dataPlano}.pdf`);
+});
+
+async function carregarPorEmbalar() {
+    const { data, error } = await supabaseClient
+        .from("encomendas")
+        .select("encomenda_id, data_entrega_pretendida, clientes(nome)")
+        .eq("estado", "Pronta")
+        .order("data_entrega_pretendida", { ascending: true });
+    if (error) { console.error(error); return; }
+
+    const corpo = document.getElementById("corpoPorEmbalar");
+    corpo.innerHTML = data.length ? "" : `<tr><td colspan="3" style="text-align:center; color:var(--ink-suave);">Nada à espera de embalamento.</td></tr>`;
+    data.forEach((enc) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td data-rotulo="Cliente">${escaparHtml(enc.clientes?.nome ?? "—")}</td>
+            <td data-rotulo="Entrega">${formatarData(enc.data_entrega_pretendida)}</td>
+            <td data-rotulo="Acção"><button onclick="abrirEmbalamento('${enc.encomenda_id}', '${escaparHtml(enc.clientes?.nome ?? "—")}')">Embalar</button></td>
+        `;
+        corpo.appendChild(tr);
+    });
+
+    const contador = document.getElementById("contadorEmbalamento");
+    if (data.length) { contador.textContent = data.length; contador.style.display = "inline-flex"; }
+    else { contador.style.display = "none"; }
+}
+
+async function abrirEmbalamento(encomendaId, nomeCliente) {
+    encomendaEmbalarId = encomendaId;
+    materiaisEmbalagemActual = [];
+    quebrasEmbalagemActual = [];
+    document.getElementById("tituloEncomendaEmbalar").textContent = nomeCliente;
+    document.getElementById("cartaoEmbalarEncomenda").style.display = "block";
+    renderizarMateriaisEmbalagem();
+    renderizarQuebrasEmbalagem();
+
+    // As quebras aqui referem-se à produção interna, não ao lote
+    // comercial (que já não tem essa granularidade) — vai buscar os
+    // artigos desta encomenda, e por cada um lista as sessões de
+    // produção com stock ainda disponível.
+    const { data: atribuicoes } = await supabaseClient
+        .from("encomenda_lote")
+        .select("lotes_comerciais(artigo_id, artigos(designacao))")
+        .eq("encomenda_id", encomendaId);
+    const artigoIds = [...new Set((atribuicoes ?? []).map((a) => a.lotes_comerciais?.artigo_id).filter(Boolean))];
+
+    let opcoesLotes = "";
+    if (artigoIds.length) {
+        const { data: lotesProducao } = await supabaseClient
+            .from("lotes_producao")
+            .select("lote_id, produto, numero_lote, quantidade_produzida")
+            .in("artigo_id", artigoIds)
+            .gt("quantidade_produzida", 0)
+            .order("data_producao", { ascending: true });
+        opcoesLotes = (lotesProducao ?? []).map((l) => `<option value="${l.lote_id}">${escaparHtml(l.produto)} · lote ${escaparHtml(l.numero_lote)} (${l.quantidade_produzida})</option>`).join("");
+    }
+    document.getElementById("emLoteProducao").innerHTML = `<option value="">Escolhe o lote de produto...</option>` + opcoesLotes;
+
+    document.getElementById("cartaoEmbalarEncomenda").scrollIntoView({ behavior: "smooth" });
+}
+
+document.getElementById("btnAdicionarMaterialEmbalagem").addEventListener("click", async () => {
+    const artigoId = document.getElementById("emArtigo").value;
+    const nomeArtigo = document.getElementById("emArtigoTexto").value.trim();
+    const quantidade = Number(document.getElementById("emQuantidade").value);
+    if (!artigoId || !quantidade) { toast("Escolhe o material e a quantidade.", "erro"); return; }
+
+    materiaisEmbalagemActual.push({ artigo_id: artigoId, nome: nomeArtigo, quantidade });
+    renderizarMateriaisEmbalagem();
+    document.getElementById("emArtigoTexto").value = "";
+    document.getElementById("emArtigo").value = "";
+    document.getElementById("emQuantidade").value = "";
+});
+
+function renderizarMateriaisEmbalagem() {
+    const container = document.getElementById("listaMateriaisEmbalagem");
+    container.innerHTML = materiaisEmbalagemActual.length ? "" : `<p style="font-size:13px; color:var(--ink-suave);">Nenhum adicionado ainda.</p>`;
+    materiaisEmbalagemActual.forEach((m, i) => {
+        const div = document.createElement("div");
+        div.style.cssText = "display:flex; justify-content:space-between; padding:6px 10px; background:var(--surface-recuado); border-radius:8px; margin-bottom:6px; font-size:13px;";
+        div.innerHTML = `<span>${escaparHtml(m.nome)} — ${m.quantidade}</span>`;
+        const btn = document.createElement("button");
+        btn.className = "secundario";
+        btn.textContent = "Remover";
+        btn.addEventListener("click", () => { materiaisEmbalagemActual.splice(i, 1); renderizarMateriaisEmbalagem(); });
+        div.appendChild(btn);
+        container.appendChild(div);
+    });
+}
+
+document.getElementById("btnAdicionarQuebraEmbalagem").addEventListener("click", () => {
+    const loteId = document.getElementById("emLoteProducao").value;
+    const loteTexto = document.getElementById("emLoteProducao").selectedOptions[0]?.textContent;
+    const quantidade = Number(document.getElementById("emQuantidadeQuebra").value);
+    const motivo = document.getElementById("emMotivoQuebra").value.trim();
+    if (!loteId || !quantidade || !motivo) { toast("Escolhe o lote, a quantidade e o motivo.", "erro"); return; }
+
+    quebrasEmbalagemActual.push({ lote_producao_id: loteId, lote_texto: loteTexto, quantidade, motivo });
+    renderizarQuebrasEmbalagem();
+    document.getElementById("emQuantidadeQuebra").value = "";
+    document.getElementById("emMotivoQuebra").value = "";
+});
+
+function renderizarQuebrasEmbalagem() {
+    const container = document.getElementById("listaQuebrasEmbalagem");
+    container.innerHTML = quebrasEmbalagemActual.length ? "" : "";
+    quebrasEmbalagemActual.forEach((q, i) => {
+        const div = document.createElement("div");
+        div.style.cssText = "display:flex; justify-content:space-between; padding:6px 10px; background:var(--surface-recuado); border-radius:8px; margin-bottom:6px; font-size:13px;";
+        div.innerHTML = `<span>${escaparHtml(q.lote_texto)} — ${q.quantidade} (${escaparHtml(q.motivo)})</span>`;
+        const btn = document.createElement("button");
+        btn.className = "secundario";
+        btn.textContent = "Remover";
+        btn.addEventListener("click", () => { quebrasEmbalagemActual.splice(i, 1); renderizarQuebrasEmbalagem(); });
+        div.appendChild(btn);
+        container.appendChild(div);
+    });
+}
+
+document.getElementById("btnConcluirEmbalamento").addEventListener("click", async () => {
+    const erroEl = document.getElementById("erroEmbalamento");
+    erroEl.textContent = "";
+
+    for (const m of materiaisEmbalagemActual) {
+        const { error } = await supabaseClient.from("embalamento_itens").insert({
+            encomenda_id: encomendaEmbalarId, artigo_id: m.artigo_id, quantidade: m.quantidade,
+        });
+        if (error) { erroEl.textContent = `${m.nome}: ${traduzirErro(error.message)}`; return; }
+    }
+
+    for (const q of quebrasEmbalagemActual) {
+        const { error } = await supabaseClient.from("embalamento_quebras").insert({
+            encomenda_id: encomendaEmbalarId, lote_producao_id: q.lote_producao_id, quantidade: q.quantidade, motivo: q.motivo,
+        });
+        if (error) { erroEl.textContent = `Quebra: ${traduzirErro(error.message)}`; return; }
+    }
+
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const { error: erroEstado } = await supabaseClient.from("encomendas").update({
+        estado: "Embalada", data_conclusao_embalamento: new Date().toISOString(), embalado_por: session.user.id,
+    }).eq("encomenda_id", encomendaEmbalarId);
+    if (erroEstado) { erroEl.textContent = traduzirErro(erroEstado.message); return; }
+
+    toast("Embalamento concluído — pronto para carregar.", "sucesso");
+    document.getElementById("cartaoEmbalarEncomenda").style.display = "none";
+    encomendaEmbalarId = null;
+    carregarPorEmbalar();
+    carregarLotesDoArtigo(null, "mLoteOrigem");
+});
+
+iniciar();
+</script>
+</body>
+</html>

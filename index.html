@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TESTES — Batardas — Gestão de Encomendas</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<link rel="icon" href="img/logo.png" type="image/png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<aside class="ambiente-testes" aria-label="Ambiente de testes">BATARDAS · TESTES — usar apenas dados fictícios</aside>
+<div class="login-box">
+    <img class="logo" src="img/logo.png" alt="Batardas">
+    <p style="color:var(--ink-suave); margin-top:-8px;">Gestão de Encomendas</p>
+    <input id="nomeUtilizadorLogin" type="text" placeholder="Nome de utilizador (ex. f.sena)" autocomplete="username">
+    <div style="position:relative;">
+        <input id="password" type="password" placeholder="Palavra-passe" autocomplete="current-password" style="width:100%; padding-right:40px;">
+        <button type="button" id="btnMostrarPassword" aria-label="Mostrar palavra-passe" style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; padding:4px; cursor:pointer; color:var(--ink-suave);">
+            <i class="ti ti-eye" id="iconeMostrarPassword" style="font-size:18px;" aria-hidden="true"></i>
+        </button>
+    </div>
+    <label style="display:flex; align-items:center; gap:8px; font-size:14px; color:var(--ink-suave); text-align:left; cursor:pointer;">
+        <input type="checkbox" id="lembrarUtilizador" style="width:auto;">
+        Lembrar o meu nome de utilizador neste computador
+    </label>
+    <button id="btnLogin">Entrar</button>
+    <p style="margin-top:12px; font-size:13px; color:var(--ink-suave);">
+        Esqueceste-te da password? Contacta o administrador para a repor.
+    </p>
+    <p id="erro" class="erro"></p>
+</div>
+
+<script src="js/supabaseClient.js"></script>
+<script>
+async function tentarLogin() {
+    const nomeUtilizador = document.getElementById("nomeUtilizadorLogin").value.trim().toLowerCase();
+    const password = document.getElementById("password").value;
+    const erroEl = document.getElementById("erro");
+    erroEl.textContent = "";
+
+    if (!nomeUtilizador || !password) {
+        erroEl.textContent = "Preenche o nome de utilizador e a palavra-passe.";
+        return;
+    }
+
+    if (document.getElementById("lembrarUtilizador").checked) {
+        localStorage.setItem("batardas_testes_utilizador_lembrado", nomeUtilizador);
+    } else {
+        localStorage.removeItem("batardas_testes_utilizador_lembrado");
+    }
+
+    // O login é por nome de utilizador, mas o Supabase Auth continua a
+    // exigir um "email" por baixo — é sempre esta etiqueta interna,
+    // nunca um email real (ver DOMINIO_LOGIN_INTERNO na Edge Function
+    // gerir-utilizadores, que tem de bater sempre certo com isto).
+    const emailLogin = `${nomeUtilizador}@login.batardas.interno`;
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email: emailLogin, password });
+    if (error) {
+        erroEl.textContent = "Credenciais inválidas.";
+        return;
+    }
+
+    const perfil = await obterPerfil(data.user.id);
+    if (!perfil) {
+        erroEl.textContent = "Perfil não configurado — contacta o admin.";
+        await supabaseClient.auth.signOut();
+        return;
+    }
+
+    if (!perfil.perfil_completo) {
+        window.location.href = "completar-perfil.html";
+        return;
+    }
+    window.location.href = ROTA_POR_ROLE[perfil.role] ?? "consulta.html";
+}
+
+document.getElementById("btnLogin").addEventListener("click", tentarLogin);
+document.getElementById("password").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") tentarLogin();
+});
+
+document.getElementById("btnMostrarPassword").addEventListener("click", () => {
+    const campo = document.getElementById("password");
+    const icone = document.getElementById("iconeMostrarPassword");
+    const aVerAgora = campo.type === "text";
+    campo.type = aVerAgora ? "password" : "text";
+    icone.className = aVerAgora ? "ti ti-eye" : "ti ti-eye-off";
+});
+
+// Pré-preenche o nome de utilizador se foi guardado numa sessão anterior
+const utilizadorLembrado = localStorage.getItem("batardas_testes_utilizador_lembrado");
+if (utilizadorLembrado) {
+    document.getElementById("nomeUtilizadorLogin").value = utilizadorLembrado;
+    document.getElementById("lembrarUtilizador").checked = true;
+    document.getElementById("password").focus();
+}
+
+// Se já houver sessão activa, salta o login e vai directo ao ecrã do perfil
+(async () => {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session) {
+        const perfil = await obterPerfil(session.user.id);
+        if (perfil && !perfil.perfil_completo) { window.location.href = "completar-perfil.html"; return; }
+        if (perfil) window.location.href = ROTA_POR_ROLE[perfil.role] ?? "consulta.html";
+    }
+})();
+</script>
+</body>
+</html>
