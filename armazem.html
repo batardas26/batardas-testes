@@ -86,6 +86,15 @@
 </section>
 
 <section class="painel" data-secao="embalamento">
+    <div class="cartao" id="cartaoPaCongeladoEmbalar">
+        <h2>PA congelado disponível para embalar</h2>
+        <p class="texto-suave">Escolhe o lote físico que vai entrar no plano de embalamento. Antes do embalamento, o PA é sempre contado em UN; selecionar não altera stock.</p>
+        <table>
+            <thead><tr><th>Artigo</th><th>Lote interno</th><th>Remanescente</th><th>Armazém</th><th>Acção</th></tr></thead>
+            <tbody id="corpoPaInternoR3"></tbody>
+        </table>
+    </div>
+
     <div class="cartao">
         <h2>Plano de embalamento</h2>
         <p style="font-size:13px; color:var(--ink-suave); margin-top:-8px;">
@@ -156,7 +165,6 @@
 
 <section class="painel" data-secao="r3">
     <div class="cartao"><h2>Entregas da Produção por receber</h2><p class="texto-suave">Confirma a quantidade física recebida. Uma divergência exige explicação; a receção não cria nem reduz stock.</p><div id="passagensReceberR31"></div></div>
-    <div class="cartao"><h2>PA congelado por embalar</h2><p style="font-size:13px;color:var(--ink-suave)">O stock antes do embalamento é sempre UN. “Remanescente” é a quantidade ainda não consumida/embalada.</p><table><thead><tr><th>Artigo</th><th>Lote interno</th><th>Estado</th><th>Produzido</th><th>Remanescente</th><th>Armazém</th></tr></thead><tbody id="corpoPaInternoR3"></tbody></table></div>
     <div class="cartao"><h2>Caixas e paletes em stock</h2><p style="font-size:13px;color:var(--ink-suave)">As unidades logísticas organizam os PCK/UN contidos; não criam stock duplicado.</p><table><thead><tr><th>Código</th><th>Tipo</th><th>Estado</th><th>Conteúdo</th><th>Lote comercial</th><th>Armazém</th></tr></thead><tbody id="corpoUnidadesLogisticasR3"></tbody></table></div>
 </section>
 
@@ -337,6 +345,7 @@ async function iniciar() {
     await activarPesquisaArtigo("emArtigoTexto", "emArtigo", "emArtigoResultados");
     await activarPesquisaArtigo("peArtigoTexto", "peArtigo", "peArtigoResultados", (artigoId) => carregarLotesPaParaEmbalar(artigoId));
     document.getElementById("peData").valueAsDate = new Date();
+    await carregarPaCongeladoParaEmbalar();
     await carregarPlanoEmbalamentoDoDia();
     await carregarListaZonas();
     await carregarStockPorZona();
@@ -976,6 +985,50 @@ async function carregarLotesPaParaEmbalar(artigoId) {
         : `<option value="">Sem lotes com stock deste produto</option>`;
 }
 
+async function carregarPaCongeladoParaEmbalar() {
+    const { data, error } = await supabaseClient
+        .from("lotes_internos")
+        .select("id, artigo_id, numero_lote, quantidade_disponivel, unidade_base, artigos(designacao), localizacoes(nome)")
+        .eq("tipo", "pa")
+        .eq("estado", "disponivel_embalamento")
+        .gt("quantidade_disponivel", 0)
+        .order("produzido_em", { ascending: true });
+    const corpo = document.getElementById("corpoPaInternoR3");
+    if (error) {
+        console.error(error);
+        corpo.innerHTML = `<tr><td colspan="5" class="erro">${escaparHtml(traduzirErro(error.message))}</td></tr>`;
+        return;
+    }
+    corpo.innerHTML = data.length ? "" : `<tr><td colspan="5" class="texto-suave">Sem PA congelado disponível para embalar.</td></tr>`;
+    data.forEach((lote) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td data-rotulo="Artigo">${escaparHtml(lote.artigos?.designacao ?? "—")}</td>
+            <td data-rotulo="Lote" class="mono">${escaparHtml(lote.numero_lote)}</td>
+            <td data-rotulo="Remanescente">${lote.quantidade_disponivel} ${formatarUnidadeStock(lote.unidade_base)}</td>
+            <td data-rotulo="Armazém">${escaparHtml(lote.localizacoes?.nome ?? "—")}</td>
+            <td data-rotulo="Acção"><button type="button">Selecionar para embalar</button></td>
+        `;
+        tr.querySelector("button").addEventListener("click", () => selecionarPaParaPlanoEmbalamento(lote));
+        corpo.appendChild(tr);
+    });
+}
+
+async function selecionarPaParaPlanoEmbalamento(lote) {
+    document.getElementById("peArtigo").value = lote.artigo_id;
+    document.getElementById("peArtigoTexto").value = lote.artigos?.designacao ?? "";
+    await carregarLotesPaParaEmbalar(lote.artigo_id);
+    document.getElementById("peLote").value = lote.id;
+    const quantidade = document.getElementById("peQuantidade");
+    quantidade.value = "";
+    quantidade.max = lote.quantidade_disponivel;
+    quantidade.placeholder = `Máximo ${lote.quantidade_disponivel} UN`;
+    document.getElementById("peUnidade").value = "un";
+    document.getElementById("peData").closest(".cartao").scrollIntoView({ behavior: "smooth", block: "start" });
+    quantidade.focus();
+    toast(`Lote ${lote.numero_lote} selecionado — indica a quantidade a embalar.`, "sucesso");
+}
+
 document.getElementById("btnAdicionarPlanoEmbalamento").addEventListener("click", async () => {
     const loteId = document.getElementById("peLote").value;
     const loteTexto = document.getElementById("peLote").selectedOptions[0]?.textContent;
@@ -1034,15 +1087,13 @@ async function removerDoPlanoEmbalamento(id) {
 document.getElementById("peData").addEventListener("change", carregarPlanoEmbalamentoDoDia);
 
 async function carregarFluxoR3() {
-    const [{data:lotes,error:erroLotes},{data:unidades,error:erroUnidades},{data:passagens,error:erroPassagens}]=await Promise.all([
-        supabaseClient.from("lotes_internos").select("numero_lote,estado,quantidade_produzida,quantidade_disponivel,unidade_base,artigos(designacao),localizacoes(nome)").eq("tipo","pa").order("produzido_em",{ascending:false}),
+    const [{data:unidades,error:erroUnidades},{data:passagens,error:erroPassagens}]=await Promise.all([
         supabaseClient.from("unidades_logisticas").select("codigo,tipo,estado,quantidade_conteudo,unidade_conteudo,lotes_comerciais(numero_lote),localizacoes(nome)").neq("estado","expedida").order("criada_em",{ascending:false}),
         supabaseClient.from("passagens_pa_r31").select("id,quantidade,destino,estado,encomenda_id,lotes_internos(numero_lote,artigos(designacao))").eq("estado","entregue").order("entregue_em"),
     ]);
-    if(erroLotes||erroUnidades||erroPassagens){console.error(erroLotes||erroUnidades||erroPassagens);return;}
+    if(erroUnidades||erroPassagens){console.error(erroUnidades||erroPassagens);return;}
     document.getElementById("passagensReceberR31").innerHTML=(passagens||[]).map(p=>`<div class="etapa-stock-r31"><strong>${escaparHtml(p.lotes_internos?.artigos?.designacao||"—")} · ${escaparHtml(p.lotes_internos?.numero_lote||"—")}</strong><p>${p.quantidade} UN · destino ${escaparHtml(p.destino)}</p><div class="linha-form"><input type="number" min="0" max="${p.quantidade}" value="${p.quantidade}" data-qtd-receber="${p.id}"><input placeholder="Explica apenas se houver divergência" data-div-receber="${p.id}"><button data-receber-pa="${p.id}">Confirmar receção</button></div></div>`).join("")||'<p class="texto-suave">Sem entregas pendentes.</p>';
-    document.querySelectorAll("[data-receber-pa]").forEach(b=>b.onclick=async()=>{const id=b.dataset.receberPa,q=Number(document.querySelector(`[data-qtd-receber="${id}"]`).value),div=document.querySelector(`[data-div-receber="${id}"]`).value||null;const {error}=await supabaseClient.rpc("receber_pa_r31",{p_passagem:id,p_quantidade_recebida:q,p_divergencia:div});if(error){toast(traduzirErro(error.message),"erro");return;}toast("Receção confirmada.","sucesso");await carregarFluxoR3();});
-    document.getElementById("corpoPaInternoR3").innerHTML=(lotes||[]).map(l=>`<tr><td data-rotulo="Artigo">${escaparHtml(l.artigos?.designacao??"—")}</td><td data-rotulo="Lote" class="mono">${escaparHtml(l.numero_lote)}</td><td data-rotulo="Estado">${escaparHtml(l.estado)}</td><td data-rotulo="Produzido">${l.quantidade_produzida} ${formatarUnidadeStock(l.unidade_base)}</td><td data-rotulo="Remanescente">${l.quantidade_disponivel} ${formatarUnidadeStock(l.unidade_base)}</td><td data-rotulo="Armazém">${escaparHtml(l.localizacoes?.nome??"—")}</td></tr>`).join("")||`<tr><td colspan="6">Sem lotes internos de PA.</td></tr>`;
+    document.querySelectorAll("[data-receber-pa]").forEach(b=>b.onclick=async()=>{const id=b.dataset.receberPa,q=Number(document.querySelector(`[data-qtd-receber="${id}"]`).value),div=document.querySelector(`[data-div-receber="${id}"]`).value||null;const {error}=await supabaseClient.rpc("receber_pa_r31",{p_passagem:id,p_quantidade_recebida:q,p_divergencia:div});if(error){toast(traduzirErro(error.message),"erro");return;}toast("Receção confirmada.","sucesso");await carregarFluxoR3();await carregarPaCongeladoParaEmbalar();});
     document.getElementById("corpoUnidadesLogisticasR3").innerHTML=(unidades||[]).map(u=>`<tr><td data-rotulo="Código" class="mono">${escaparHtml(u.codigo)}</td><td data-rotulo="Tipo">${escaparHtml(u.tipo)}</td><td data-rotulo="Estado">${escaparHtml(u.estado)}</td><td data-rotulo="Conteúdo">${u.quantidade_conteudo} ${formatarUnidadeStock(u.unidade_conteudo)}</td><td data-rotulo="Lote">${escaparHtml(u.lotes_comerciais?.numero_lote??"—")}</td><td data-rotulo="Armazém">${escaparHtml(u.localizacoes?.nome??"—")}</td></tr>`).join("")||`<tr><td colspan="6">Sem caixas ou paletes.</td></tr>`;
 }
 
