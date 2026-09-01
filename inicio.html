@@ -71,7 +71,7 @@ async function iniciarHomepage() {
 }
 
 function renderizarModulos(perfil, roleVisual=null) {
-    const acessos = roleVisual ? new Set([roleVisual]) : new Set([perfil.role, ...(perfil.acessosExtra||[])]);
+    const acessos = roleVisual ? new Set([roleVisual]) : perfil.super_admin ? new Set(MODULOS.flatMap(m=>m.roles)) : new Set([perfil.role, ...(perfil.acessosExtra||[])]);
     document.getElementById("modulosDisponiveis").innerHTML = MODULOS.filter(m => m.roles.some(r=>acessos.has(r))).map(m =>
         `<a class="cartao-modulo" href="${m.href}"><i class="ti ti-${m.icon}"></i><span>${escaparHtml(m.nome)}</span><i class="ti ti-chevron-right"></i></a>`
     ).join("");
@@ -105,7 +105,7 @@ const AREA_DO_ROLE={producao:"producao",armazem:"armazem",qualidade:"qualidade",
 let diaAtualR31=null;
 let diaVisivelR31=null;
 async function carregarDiaOperacional(perfil,userId) {
-    const areasResponsavel=(perfil.acessosArea||[]).filter(a=>a.nivel==="responsavel"&&AREA_DO_ROLE[a.area]).map(a=>a.area);
+    const areasResponsavel=perfil.super_admin?Object.keys(AREA_DO_ROLE):(perfil.acessosArea||[]).filter(a=>a.nivel==="responsavel"&&AREA_DO_ROLE[a.area]).map(a=>a.area);
     const acessosPerfil=new Set([perfil.role,...(perfil.acessosExtra||[])]);
     const podeSupervisionar=acessosPerfil.has("admin")||acessosPerfil.has("consulta");
     const controlo=document.getElementById("controloDiaR31");
