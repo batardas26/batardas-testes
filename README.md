@@ -1,1 +1,0 @@
-# batardas-testes
