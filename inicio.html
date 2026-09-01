@@ -57,7 +57,7 @@ const MODULOS = [
 async function iniciarHomepage() {
     const session = await exigirSessao(); if (!session) return;
     const perfil = await obterPerfil(session.user.id); if (!perfil) return;
-    const rotaPendente = rotaPendentePrimeiroAcesso(perfil);
+    const rotaPendente = rotaPendentePrimeiroAcesso(perfil, session.user);
     if (rotaPendente) { location.href=rotaPendente; return; }
     await renderizarCabecalhoUtilizador(perfil, session.user.id);
     await instalarPedidoRapidoManutencao(perfil);

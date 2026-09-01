@@ -69,7 +69,7 @@ async function tentarLogin() {
         return;
     }
 
-    const rotaPendente = rotaPendentePrimeiroAcesso(perfil);
+    const rotaPendente = rotaPendentePrimeiroAcesso(perfil, data.user);
     if (rotaPendente) {
         window.location.href = rotaPendente;
         return;
@@ -103,7 +103,7 @@ if (utilizadorLembrado) {
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (session) {
         const perfil = await obterPerfil(session.user.id);
-        const rotaPendente = rotaPendentePrimeiroAcesso(perfil);
+        const rotaPendente = rotaPendentePrimeiroAcesso(perfil, session.user);
         if (rotaPendente) { window.location.href = rotaPendente; return; }
         if (perfil) window.location.href = "inicio.html";
     }

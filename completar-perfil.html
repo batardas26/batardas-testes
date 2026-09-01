@@ -48,7 +48,10 @@ let ficheiroFotoEscolhido = null;
 
     const perfil = await obterPerfil(session.user.id);
     if (!perfil) { window.location.href = "index.html"; return; }
-    if (perfil.deve_alterar_password) { window.location.href = "redefinir-password.html?primeiro=1"; return; }
+    if (rotaPendentePrimeiroAcesso(perfil, session.user)?.startsWith("redefinir-password")) {
+        window.location.href = "redefinir-password.html?primeiro=1";
+        return;
+    }
     if (perfilTemDadosObrigatorios(perfil)) {
         window.location.href = "inicio.html";
         return;
