@@ -35,8 +35,9 @@
             <h2>Dia operacional</h2>
             <div id="controloDiaR31"></div>
             <div id="checklistDiaR31"><p class="texto-suave">A carregar tarefas…</p></div>
-            <div id="novaTarefaR31" style="display:none;margin-top:12px;"><input id="tituloNovaTarefaR31" placeholder="Nova tarefa a atribuir"><button id="btnNovaTarefaR31">Adicionar tarefa</button></div>
+            <div id="novaTarefaR31" class="linha-form" style="display:none;margin-top:12px;"><input id="tituloNovaTarefaR31" placeholder="Nova tarefa a atribuir"><select id="pessoaNovaTarefaR31"><option value="">Equipa da área</option></select><button id="btnNovaTarefaR31">Adicionar tarefa</button></div>
             <p class="nota-turno">A checklist é viva: as tarefas automáticas só aparecem quando existem planos, movimentos ou trabalho em curso. Nunca altera stock.</p>
+            <div id="supervisaoDiaR31" style="display:none;margin-top:20px;"></div>
         </div>
     </section>
     <section id="previewPerfisR31" class="cartao" style="display:none;margin-top:24px;"></section>
@@ -105,19 +106,55 @@ let diaAtualR31=null;
 let diaVisivelR31=null;
 async function carregarDiaOperacional(perfil,userId) {
     const areasResponsavel=(perfil.acessosArea||[]).filter(a=>a.nivel==="responsavel"&&AREA_DO_ROLE[a.area]).map(a=>a.area);
+    const acessosPerfil=new Set([perfil.role,...(perfil.acessosExtra||[])]);
+    const podeSupervisionar=acessosPerfil.has("admin")||acessosPerfil.has("consulta");
     const controlo=document.getElementById("controloDiaR31");
+    if(podeSupervisionar) prepararSupervisaoDiaR31();
     if(!areasResponsavel.length){
-        controlo.innerHTML='<p class="texto-suave">Vês apenas tarefas que te foram atribuídas por um responsável.</p>';
+        controlo.innerHTML=podeSupervisionar?'<p class="texto-suave">Vista de acompanhamento — a execução continua a pertencer aos responsáveis e às pessoas atribuídas.</p>':'<p class="texto-suave">Vês apenas tarefas que te foram atribuídas por um responsável.</p>';
         const {data:tarefas}=await supabaseClient.from("tarefas_dia_r31").select("id,titulo,origem,concluida,dias_operacionais_r31!inner(estado,data_operacional,area)").eq("atribuida_a",userId).eq("dias_operacionais_r31.estado","aberto");
-        renderizarTarefas(tarefas||[],false); return;
+        renderizarTarefas(tarefas||[],false);
+        if(podeSupervisionar) await carregarSupervisaoDiaR31();
+        return;
     }
     controlo.innerHTML=`<div class="estado-dia-r31"><select id="areaDiaR31">${areasResponsavel.map(a=>`<option value="${a}">${a[0].toUpperCase()+a.slice(1)}</option>`).join("")}</select><span id="estadoDiaR31">A verificar…</span></div><div class="linha-form"><button id="btnAbrirDiaR31">Abrir dia</button><button id="btnFecharDiaR31" class="secundario">Fechar dia</button></div><textarea id="notaContinuidadeR31" placeholder="Continuidade para amanhã, férias ou delegação (opcional)"></textarea>`;
-    controlo.querySelector("#areaDiaR31").onchange=lerDiaAberto;
+    controlo.querySelector("#areaDiaR31").onchange=async()=>{await lerDiaAberto();await carregarPessoasAreaR31();};
     controlo.querySelector("#btnAbrirDiaR31").onclick=abrirDia;
     controlo.querySelector("#btnFecharDiaR31").onclick=fecharDia;
     document.getElementById("novaTarefaR31").style.display="block";
     document.getElementById("btnNovaTarefaR31").onclick=adicionarTarefa;
     await lerDiaAberto();
+    await carregarPessoasAreaR31();
+    if(podeSupervisionar) await carregarSupervisaoDiaR31();
+}
+
+function prepararSupervisaoDiaR31(){
+    const caixa=document.getElementById("supervisaoDiaR31");caixa.style.display="block";
+    caixa.innerHTML=`<hr><div class="linha-form"><div><h3 style="margin-bottom:4px">Acompanhamento da equipa completa</h3><p class="texto-suave">Leitura por área, pessoa atribuída e estado.</p></div><input id="dataSupervisaoR31" type="date" value="${new Date().toISOString().slice(0,10)}"></div><div id="listaSupervisaoR31"><p class="texto-suave">A carregar…</p></div>`;
+    caixa.querySelector("#dataSupervisaoR31").addEventListener("change",carregarSupervisaoDiaR31);
+}
+
+async function carregarSupervisaoDiaR31(){
+    const alvo=document.getElementById("listaSupervisaoR31"),data=document.getElementById("dataSupervisaoR31")?.value;
+    if(!alvo||!data)return;
+    const {data:dias,error}=await supabaseClient.from("dias_operacionais_r31").select("id,area,data_operacional,estado,aberto_em,fechado_em,nota_continuidade").eq("data_operacional",data).order("area");
+    if(error){alvo.innerHTML=`<p class="erro">${escaparHtml(traduzirErro(error.message))}</p>`;return;}
+    if(!dias?.length){alvo.innerHTML='<p class="texto-suave">Nenhuma área abriu o dia nesta data.</p>';return;}
+    const ids=dias.map(d=>d.id);
+    const [{data:tarefas},{data:historico}]=await Promise.all([
+        supabaseClient.from("tarefas_dia_r31").select("id,dia_id,titulo,origem,atribuida_a,concluida,concluida_por,concluida_em,obrigatoria_fecho").in("dia_id",ids).order("criada_em"),
+        supabaseClient.from("historico_dia_operacional_r31").select("dia_id,evento,efetuado_em").in("dia_id",ids).order("efetuado_em"),
+    ]);
+    const pessoasIds=[...new Set((tarefas||[]).flatMap(t=>[t.atribuida_a,t.concluida_por]).filter(Boolean))];
+    let nomes={};
+    if(pessoasIds.length){const {data:pessoas}=await supabaseClient.from("perfis").select("id,nome").in("id",pessoasIds);nomes=Object.fromEntries((pessoas||[]).map(p=>[p.id,p.nome]));}
+    const hora=v=>v?new Date(v).toLocaleTimeString("pt-PT",{hour:"2-digit",minute:"2-digit"}):"—";
+    const rotuloEvento={aberto:"Aberto",reaberto:"Reaberto",fechado:"Fechado"};
+    alvo.innerHTML=dias.map(d=>{
+        const lista=(tarefas||[]).filter(t=>t.dia_id===d.id);
+        const ciclos=(historico||[]).filter(h=>h.dia_id===d.id).map(h=>`${rotuloEvento[h.evento]||h.evento} ${hora(h.efetuado_em)}`).join(" · ");
+        return `<article class="supervisao-area-r31"><div class="supervisao-area-topo-r31"><strong>${escaparHtml(d.area[0].toUpperCase()+d.area.slice(1))}</strong><span>Abertura ${hora(d.aberto_em)} · ${d.fechado_em?`Fecho ${hora(d.fechado_em)}`:"Em aberto"}</span></div>${ciclos?`<small class="texto-suave">Histórico: ${escaparHtml(ciclos)}</small>`:""}<div>${lista.length?lista.map(t=>`<div class="tarefa-supervisao-r31"><span>${t.concluida?"✓":"○"} ${escaparHtml(t.titulo)}</span><small>${t.atribuida_a?`Atribuída a ${escaparHtml(nomes[t.atribuida_a]||"utilizador")}`:`Equipa de ${escaparHtml(d.area)}`} · ${t.concluida?`Concluída${t.concluida_por?` por ${escaparHtml(nomes[t.concluida_por]||"utilizador")}`:""}`:"Pendente"}</small></div>`).join(""):'<p class="texto-suave">Sem tarefas planeadas.</p>'}</div></article>`;
+    }).join("");
 }
 
 async function lerDiaAberto(){
@@ -137,6 +174,8 @@ async function lerDiaAberto(){
     else estado.textContent="Sem dia registado";
     nota.value=visivel?.nota_continuidade||"";
     nota.disabled=!aberto;
+    document.getElementById("btnAbrirDiaR31").disabled=Boolean(aberto);
+    document.getElementById("btnFecharDiaR31").disabled=!aberto;
     if(aberto) await supabaseClient.rpc("sincronizar_checklist_dia_r31",{p_dia:aberto.id});
     await lerTarefas();
 }
@@ -163,8 +202,17 @@ function renderizarTarefas(tarefas,podeGerir){
 async function adicionarTarefa(){
     if(!diaAtualR31){toast("Abre primeiro o dia operacional.","erro");return;}
     const campo=document.getElementById("tituloNovaTarefaR31"),titulo=campo.value.trim(); if(!titulo)return;
-    const {error}=await supabaseClient.rpc("adicionar_tarefa_dia_r31",{p_dia:diaAtualR31.id,p_titulo:titulo,p_atribuida_a:null,p_obrigatoria:true});
+    const atribuidaA=document.getElementById("pessoaNovaTarefaR31").value||null;
+    const {error}=await supabaseClient.rpc("adicionar_tarefa_dia_r31",{p_dia:diaAtualR31.id,p_titulo:titulo,p_atribuida_a:atribuidaA,p_obrigatoria:true});
     if(error){toast(traduzirErro(error.message),"erro");return;} campo.value=""; await lerTarefas();
+}
+async function carregarPessoasAreaR31(){
+    const seletor=document.getElementById("pessoaNovaTarefaR31"),area=document.getElementById("areaDiaR31")?.value;if(!seletor||!area)return;
+    const hoje=new Date().toISOString().slice(0,10);
+    const {data:acessos}=await supabaseClient.from("acessos_area_r31").select("perfil_id").eq("area",area).in("nivel",["operador","responsavel"]).lte("valido_desde",hoje).or(`valido_ate.is.null,valido_ate.gte.${hoje}`);
+    const ids=[...new Set((acessos||[]).map(a=>a.perfil_id))];
+    let pessoas=[];if(ids.length){const {data}=await supabaseClient.from("perfis").select("id,nome").in("id",ids).order("nome");pessoas=data||[];}
+    seletor.innerHTML='<option value="">Equipa da área</option>'+pessoas.map(p=>`<option value="${p.id}">${escaparHtml(p.nome)}</option>`).join("");
 }
 iniciarHomepage();
 </script>

@@ -94,11 +94,14 @@
         </div>
         <div class="linha-form">
             <input id="fQuantidade" type="number" min="1" placeholder="Quantidade">
+            <button id="btnAdicionarLinhaEncomenda" type="button" class="secundario">Adicionar linha</button>
         </div>
+        <div id="linhasNovaEncomenda" style="margin:12px 0;"><p class="texto-suave">Ainda não adicionaste artigos.</p></div>
         <div class="linha-form">
             <input id="fDataEntrega" type="date">
-            <button id="btnRegistar">Registar encomenda</button>
+            <input id="fObservacoesEncomenda" placeholder="Observações da encomenda (opcional)">
         </div>
+        <button id="btnRegistar" style="width:100%">Registar encomenda completa</button>
         <p id="erroRegisto" class="erro"></p>
     </div>
 
@@ -1624,19 +1627,22 @@ async function carregar() {
 
     const { data: todas, error: erro2 } = await supabaseClient
         .from("encomendas")
-        .select("encomenda_id, data_entrega_pretendida, estado, clientes(nome)")
+        .select("encomenda_id, data_entrega_pretendida, estado, clientes(nome), linhas_encomenda(linha_id,produto,quantidade_pedida,unidade_movimentacao)")
         .order("data_entrega_pretendida", { ascending: true })
         .limit(30);
 
     const corpoTodas = document.getElementById("corpoTodas");
     if (erro2) { console.error(erro2); return; }
+    const idsLinhas=todas.flatMap(e=>(e.linhas_encomenda||[]).map(l=>l.linha_id));
+    let resumoPorLinha={};
+    if(idsLinhas.length){const {data:resumos}=await supabaseClient.from("resumo_linhas_encomenda_r31").select("linha_id,quantidade_pronta_stock,quantidade_por_embalar_stock,quantidade_por_produzir_stock,unidade_stock,estado_linha").in("linha_id",idsLinhas);resumoPorLinha=Object.fromEntries((resumos||[]).map(r=>[r.linha_id,r]));}
     corpoTodas.innerHTML = "";
     todas.forEach((enc) => {
         const classeEstado = CLASSE_ESTADO[enc.estado] ?? "Registada";
         const podeCancelar = enc.estado !== "Cancelada";
         const tr = document.createElement("tr");
         tr.innerHTML = `
-            <td data-rotulo="Cliente">${escaparHtml(enc.clientes?.nome ?? "—")}</td>
+            <td data-rotulo="Cliente"><strong>${escaparHtml(enc.clientes?.nome ?? "—")}</strong>${(enc.linhas_encomenda||[]).map(l=>{const r=resumoPorLinha[l.linha_id]||{};return `<div class="linha-encomenda-resumo-r31">${escaparHtml(l.produto)} · ${l.quantidade_pedida} ${formatarUnidadeStock(l.unidade_movimentacao)}<small>Pronto ${r.quantidade_pronta_stock??0} · Por embalar ${r.quantidade_por_embalar_stock??0} · Por produzir ${r.quantidade_por_produzir_stock??0} ${formatarUnidadeStock(r.unidade_stock)}</small></div>`;}).join("")}</td>
             <td data-rotulo="Entrega">${formatarData(enc.data_entrega_pretendida)}</td>
             <td data-rotulo="Estado"><span class="badge ${classeEstado}">${escaparHtml(formatarEstadoEncomenda(enc.estado))}</span></td>
             <td data-rotulo="">${podeCancelar ? `<button class="secundario" style="padding:4px 10px; font-size:12px;">Cancelar</button>` : ""}</td>
@@ -1672,6 +1678,28 @@ async function cancelarEncomenda(encomendaId) {
     carregar();
 }
 
+let linhasNovaEncomenda=[];
+
+function renderizarLinhasNovaEncomenda(){
+    const alvo=document.getElementById("linhasNovaEncomenda");
+    if(!linhasNovaEncomenda.length){alvo.innerHTML='<p class="texto-suave">Ainda não adicionaste artigos.</p>';return;}
+    alvo.innerHTML=`<table><thead><tr><th>Artigo</th><th>Quantidade</th><th></th></tr></thead><tbody>${linhasNovaEncomenda.map((l,i)=>`<tr><td>${escaparHtml(l.designacao)}</td><td>${l.quantidade} ${formatarUnidadeStock(l.unidade)}</td><td><button type="button" class="secundario" data-remover-linha="${i}">Remover</button></td></tr>`).join("")}</tbody></table>`;
+    alvo.querySelectorAll("[data-remover-linha]").forEach(b=>b.onclick=()=>{linhasNovaEncomenda.splice(Number(b.dataset.removerLinha),1);renderizarLinhasNovaEncomenda();});
+}
+
+document.getElementById("btnAdicionarLinhaEncomenda").addEventListener("click",async()=>{
+    const artigoId=document.getElementById("fProduto").value;
+    const artigo=artigoId?await obterArtigoPorId(artigoId):null;
+    const quantidade=Number(document.getElementById("fQuantidade").value);
+    const unidade=document.getElementById("fUnidade").value;
+    if(!artigoId||!artigo||quantidade<=0){document.getElementById("erroRegisto").textContent="Escolhe o artigo e indica uma quantidade válida.";return;}
+    const existente=linhasNovaEncomenda.find(l=>l.artigo_id===artigoId&&l.unidade===unidade);
+    if(existente)existente.quantidade+=quantidade;
+    else linhasNovaEncomenda.push({artigo_id:artigoId,designacao:artigo.designacao,quantidade,unidade});
+    document.getElementById("fProdutoTexto").value="";document.getElementById("fProduto").value="";document.getElementById("fQuantidade").value="";
+    document.getElementById("erroRegisto").textContent="";renderizarLinhasNovaEncomenda();
+});
+
 document.getElementById("btnRegistar").addEventListener("click", async () => {
     const erroEl = document.getElementById("erroRegisto");
     erroEl.textContent = "";
@@ -1679,14 +1707,10 @@ document.getElementById("btnRegistar").addEventListener("click", async () => {
     const clienteIdSeleccionado = document.getElementById("fCliente").value;
     const nomeCliente = document.getElementById("fClienteTexto").value.trim();
     const canal = document.getElementById("fCanal").value;
-    const artigoId = document.getElementById("fProduto").value;
-    const artigo = artigoId ? await obterArtigoPorId(artigoId) : null;
-    const produtoNome = artigo?.designacao ?? "";
-    const quantidade = Number(document.getElementById("fQuantidade").value);
     const dataEntrega = document.getElementById("fDataEntrega").value;
 
-    if (!nomeCliente || !artigoId || !quantidade || !dataEntrega) {
-        erroEl.textContent = "Preenche todos os campos.";
+    if (!nomeCliente || !linhasNovaEncomenda.length || !dataEntrega) {
+        erroEl.textContent = "Indica o cliente, a data e adiciona pelo menos uma linha.";
         return;
     }
 
@@ -1707,31 +1731,23 @@ document.getElementById("btnRegistar").addEventListener("click", async () => {
         }
     }
 
-    const { data: novaEncomenda, error: erroEncomenda } = await supabaseClient
-        .from("encomendas")
-        .insert({ cliente_id: clienteId, canal, data_entrega_pretendida: dataEntrega })
-        .select().single();
-    if (erroEncomenda) { erroEl.textContent = "Erro ao registar: " + erroEncomenda.message; return; }
-
-    const { error: erroLinha } = await supabaseClient
-        .from("linhas_encomenda")
-        .insert({
-            encomenda_id: novaEncomenda.encomenda_id,
-            produto: produtoNome,
-            artigo_id: artigoId,
-            unidade_movimentacao: document.getElementById("fUnidade").value,
-            quantidade_pedida: quantidade,
-        });
-    if (erroLinha) { erroEl.textContent = "Encomenda criada, mas falhou a linha: " + erroLinha.message; return; }
+    const {data:novaEncomenda,error:erroEncomenda}=await supabaseClient.rpc("criar_encomenda_multilinha_r31",{
+        p_cliente:clienteId,p_canal:canal,p_data_entrega:dataEntrega,
+        p_linhas:linhasNovaEncomenda.map(l=>({artigo_id:l.artigo_id,quantidade:l.quantidade,unidade:l.unidade})),
+        p_observacoes:document.getElementById("fObservacoesEncomenda").value||null,
+    });
+    if(erroEncomenda){erroEl.textContent="A encomenda não foi criada: "+traduzirErro(erroEncomenda.message);return;}
 
     ["fQuantidade", "fDataEntrega"].forEach((id) => document.getElementById(id).value = "");
     document.getElementById("fClienteTexto").value = "";
     document.getElementById("fCliente").value = "";
     document.getElementById("fProdutoTexto").value = "";
     document.getElementById("fProduto").value = "";
+    document.getElementById("fObservacoesEncomenda").value = "";
+    linhasNovaEncomenda=[];renderizarLinhasNovaEncomenda();
     carregar();
     carregarPlaneamentoSemanal();
-    toast("Encomenda registada.", "sucesso");
+    toast(`Encomenda registada com afetação automática de stock por etapa.`, "sucesso");
 });
 
 // --- PDF semanal --------------------------------------------------------
