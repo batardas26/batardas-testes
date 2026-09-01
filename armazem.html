@@ -22,6 +22,7 @@
     <button class="nav-item" data-secao="pedidos"><i class="ti ti-clipboard-list" aria-hidden="true"></i> Pedidos <span class="contador" id="contadorPedidos" style="display:none;"></span></button>
     <button class="nav-item" data-secao="movimentos"><i class="ti ti-arrows-exchange" aria-hidden="true"></i> Movimentos de stock</button>
     <button class="nav-item" data-secao="zonas"><i class="ti ti-map-pin" aria-hidden="true"></i> Stock &amp; Zonas</button>
+    <button class="nav-item" data-secao="r3"><i class="ti ti-route" aria-hidden="true"></i> Fluxo interno R3</button>
     <button class="nav-item" data-secao="inventario"><i class="ti ti-clipboard-list" aria-hidden="true"></i> Inventário <span class="contador" id="contadorInventario" style="display:none;"></span></button>
     <button class="nav-item" data-secao="qualidade"><i class="ti ti-clipboard-check" aria-hidden="true"></i> Qualidade</button>
     <a class="nav-item" href="modelo-artigos-lotes.html" style="text-decoration:none;"><i class="ti ti-arrows-transfer-up" aria-hidden="true"></i> Transformar lote</a>
@@ -91,6 +92,7 @@
         </div>
         <div class="linha-form">
             <input id="peQuantidade" type="number" min="0.01" step="0.01" placeholder="Quantidade a embalar">
+            <select id="peUnidade"><option value="un">UN</option><option value="pack">PCK</option><option value="caixa">Caixa</option></select>
             <button id="btnAdicionarPlanoEmbalamento">Adicionar ao plano</button>
         </div>
         <table style="margin-top:16px;">
@@ -137,6 +139,11 @@
         <p id="erroEmbalamento" class="erro" style="margin-top:12px;"></p>
         <button id="btnConcluirEmbalamento" style="margin-top:12px;">Dar embalamento como concluído</button>
     </div>
+</section>
+
+<section class="painel" data-secao="r3">
+    <div class="cartao"><h2>PA congelado por embalar</h2><p style="font-size:13px;color:var(--ink-suave)">O stock antes do embalamento é sempre UN. A quantidade produzida não muda; os consumos reduzem apenas o saldo.</p><table><thead><tr><th>Artigo</th><th>Lote interno</th><th>Estado</th><th>Produzido</th><th>Saldo</th><th>Armazém</th></tr></thead><tbody id="corpoPaInternoR3"></tbody></table></div>
+    <div class="cartao"><h2>Caixas e paletes em stock</h2><p style="font-size:13px;color:var(--ink-suave)">As unidades logísticas organizam os PCK/UN contidos; não criam stock duplicado.</p><table><thead><tr><th>Código</th><th>Tipo</th><th>Estado</th><th>Conteúdo</th><th>Lote comercial</th><th>Armazém</th></tr></thead><tbody id="corpoUnidadesLogisticasR3"></tbody></table></div>
 </section>
 
 <section class="painel" data-secao="pedidos" id="pedidos">
@@ -203,6 +210,14 @@
             <button id="btnMovimento"><i class="ti ti-device-floppy" style="font-size:14px; vertical-align:-2px; margin-right:4px;" aria-hidden="true"></i>Registar</button>
         </div>
         <p id="erroMovimento" class="erro"></p>
+    </div>
+
+    <div class="cartao">
+        <h2>Movimento de artigo sem lote</h2>
+        <p style="font-size:13px;color:var(--ink-suave)">Para cartonados e utilitários parametrizados pelo Super Admin como “sem lote”. Não cria um lote artificial.</p>
+        <div class="linha-form"><div class="campo-pesquisa-artigo"><input id="slArtigoTexto" placeholder="Pesquisar artigo sem lote..." autocomplete="off"><input id="slArtigo" type="hidden"><div id="slArtigoResultados" class="lista-sugestoes" style="display:none"></div></div><select id="slTipo"><option value="Entrada">Entrada</option><option value="Saída">Saída</option><option value="Transferência">Transferência</option></select></div>
+        <div class="linha-form"><input id="slQuantidade" type="number" min="0.001" step="0.001" placeholder="Quantidade"><select id="slUnidade"><option value="">Escolhe o artigo</option></select><select id="slOrigem"><option value="">Armazém de origem</option></select><select id="slDestino"><option value="">Armazém de destino</option></select></div>
+        <div class="linha-form"><input id="slOcorrido" type="datetime-local"><input id="slObservacoes" placeholder="Observações"><button id="btnMovimentoSemLote">Registar sem lote</button></div><p id="erroMovimentoSemLote" class="erro"></p>
     </div>
 </section>
 
@@ -309,8 +324,12 @@ async function iniciar() {
     await carregarListaZonas();
     await carregarStockPorZona();
     await carregarInventariosPendentes();
+    await carregarFluxoR3();
     await actualizarContadorMovimentosPendentesEnvio();
     await activarPesquisaArtigo("ivArtigoTexto", "ivArtigo", "ivArtigoResultados");
+    await activarPesquisaArtigo("slArtigoTexto", "slArtigo", "slArtigoResultados", carregarConfiguracaoSemLoteR3);
+    await carregarZonasSemLoteR3();
+    document.getElementById("slOcorrido").value = new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);
 
     supabaseClient
         .channel("encomendas-fernando")
@@ -339,28 +358,61 @@ async function carregarLotesDoArtigo(artigoId, idSelect) {
         .from("lotes_artigo")
         .select("lote_artigo_id, numero_lote, quantidade_atual, localizacoes(nome), artigos(unidade_stock, configuracao_unidades_confirmada)")
         .eq("artigo_id", artigoId)
+        .gt("quantidade_atual", 0)
+        .eq("estado_qualidade", "disponivel")
         .order("numero_lote");
     if (error) { console.error(error); return; }
 
     select.disabled = false;
     select.innerHTML = data.length
-        ? data.map((l) => `<option value="${l.lote_artigo_id}" data-unidade="${escaparHtml(l.artigos?.unidade_stock || "")}" data-confirmada="${l.artigos?.configuracao_unidades_confirmada ? "1" : "0"}">Lote ${escaparHtml(l.numero_lote)} (${l.quantidade_atual}) · ${escaparHtml(l.localizacoes?.nome ?? "sem armazém")}</option>`).join("")
+        ? data.map((l) => `<option value="${l.lote_artigo_id}" data-artigo="${artigoId}" data-unidade="${escaparHtml(l.artigos?.unidade_stock || "")}" data-confirmada="${l.artigos?.configuracao_unidades_confirmada ? "1" : "0"}">Lote ${escaparHtml(l.numero_lote)} (${l.quantidade_atual}) · ${escaparHtml(l.localizacoes?.nome ?? "sem armazém")}</option>`).join("")
         : `<option value="">Sem lotes deste artigo em stock</option>`;
     if (idSelect === "mLoteOrigem") actualizarRotuloUnidade();
 }
 
-function actualizarRotuloUnidade() {
+async function actualizarRotuloUnidade() {
     const loteSelect = document.getElementById("mLoteOrigem");
     const opcaoEscolhida = loteSelect.options[loteSelect.selectedIndex];
     const unidadeReal = opcaoEscolhida?.dataset.unidade || "";
     const confirmada = opcaoEscolhida?.dataset.confirmada === "1";
+    const artigoId = opcaoEscolhida?.dataset.artigo;
     const selectUnidade = document.getElementById("mUnidade");
-    selectUnidade.innerHTML = confirmada
-        ? `<option value="${escaparHtml(unidadeReal)}">${unidadeReal === "pack" ? "PCK" : escaparHtml(unidadeReal.toUpperCase())}</option>`
-        : `<option value="">Unidade base por confirmar pelo Super Admin</option>`;
+    if (!confirmada) selectUnidade.innerHTML=`<option value="">Unidade base por confirmar pelo Super Admin</option>`;
+    else {
+        const {data:conversoes}=await supabaseClient.from("conversoes_artigo").select("unidade_origem").eq("artigo_id",artigoId).eq("ativo",true);
+        const unidades=[...new Set([unidadeReal,...(conversoes??[]).map(c=>c.unidade_origem)])];
+        selectUnidade.innerHTML=unidades.map(u=>`<option value="${escaparHtml(u)}">${u==="pack"?"PCK":escaparHtml(u.toUpperCase())}</option>`).join("");
+    }
     selectUnidade.disabled = !confirmada;
 }
 document.getElementById("mLoteOrigem").addEventListener("change", actualizarRotuloUnidade);
+
+async function carregarConfiguracaoSemLoteR3(artigoId) {
+    const [{data:artigo},{data:conversoes}]=await Promise.all([
+        supabaseClient.from("artigos").select("unidade_stock,controla_lote_fornecedor").eq("artigo_id",artigoId).single(),
+        supabaseClient.from("conversoes_artigo").select("unidade_origem").eq("artigo_id",artigoId).eq("ativo",true),
+    ]);
+    const erro=document.getElementById("erroMovimentoSemLote");
+    if(artigo?.controla_lote_fornecedor){erro.textContent="Este artigo está configurado para trabalhar com lote.";document.getElementById("slArtigo").value="";return;}
+    erro.textContent="";
+    const unidades=[...new Set([artigo?.unidade_stock,...(conversoes??[]).map(x=>x.unidade_origem)].filter(Boolean))];
+    document.getElementById("slUnidade").innerHTML=unidades.map(u=>`<option value="${escaparHtml(u)}">${formatarUnidadeStock(u)}</option>`).join("");
+}
+
+async function carregarZonasSemLoteR3(){
+    const {data}=await supabaseClient.from("localizacoes").select("localizacao_id,nome").order("nome");
+    const opts=`<option value="">—</option>`+(data??[]).map(z=>`<option value="${z.localizacao_id}">${escaparHtml(z.nome)}</option>`).join("");
+    document.getElementById("slOrigem").innerHTML=opts;document.getElementById("slDestino").innerHTML=opts;
+}
+
+document.getElementById("btnMovimentoSemLote").addEventListener("click",async()=>{
+    const erro=document.getElementById("erroMovimentoSemLote");erro.textContent="";
+    const tipo=document.getElementById("slTipo").value, artigo=document.getElementById("slArtigo").value, quantidade=Number(document.getElementById("slQuantidade").value), unidade=document.getElementById("slUnidade").value, origem=document.getElementById("slOrigem").value||null, destino=document.getElementById("slDestino").value||null;
+    if(!artigo||!quantidade||!unidade||(tipo!=="Entrada"&&!origem)||(tipo!=="Saída"&&!destino)){erro.textContent="Preenche artigo, quantidade, unidade e o(s) armazém(ns) exigidos pelo movimento.";return;}
+    const {error}=await supabaseClient.rpc("registar_movimento_sem_lote_r3",{p_artigo:artigo,p_tipo:tipo,p_quantidade:quantidade,p_unidade:unidade,p_origem:origem,p_destino:destino,p_ocorrido_em:new Date(document.getElementById("slOcorrido").value).toISOString(),p_observacoes:document.getElementById("slObservacoes").value.trim()||null});
+    if(error){erro.textContent=traduzirErro(error.message);return;}
+    toast("Movimento sem lote registado.","sucesso");document.getElementById("slQuantidade").value="";await Promise.all([carregarStockPorZona(),actualizarContadorMovimentosPendentesEnvio()]);
+});
 
 async function carregarPedidosPendentes() {
     const { data, error } = await supabaseClient
@@ -523,7 +575,7 @@ async function marcarPronta(encomendaId) {
     toast("Picking concluído — passa para embalamento.", "sucesso");
 }
 
-const TITULOS_SECAO = { picking: "Picking", embalamento: "Embalamento", pedidos: "Pedidos de armazém", movimentos: "Movimentos de stock", zonas: "Stock & Zonas", inventario: "Inventário", qualidade: "Qualidade" };
+const TITULOS_SECAO = { picking: "Picking", embalamento: "Embalamento", pedidos: "Pedidos de armazém", movimentos: "Movimentos de stock", zonas: "Stock & Zonas", r3: "Fluxo interno R3", inventario: "Inventário", qualidade: "Qualidade" };
 
 function mudarSecao(secao) {
     document.querySelectorAll(".nav-item").forEach((btn) => btn.classList.toggle("activo", btn.dataset.secao === secao));
@@ -572,12 +624,12 @@ document.getElementById("btnCriarZona").addEventListener("click", async () => {
 let ultimoStockPorZona = [];
 
 async function carregarStockPorZona() {
-    const { data, error } = await supabaseClient
-        .from("lotes_artigo")
-        .select("numero_lote, quantidade_atual, localizacao_id, artigos(designacao, unidade_stock), localizacoes(nome)")
-        .order("numero_lote");
-    if (error) { console.error(error); return; }
-    ultimoStockPorZona = data ?? [];
+    const [{data:comLote,error:erroLote},{data:semLote,error:erroSemLote}] = await Promise.all([
+        supabaseClient.from("lotes_artigo").select("numero_lote, quantidade_atual, localizacao_id, artigos(designacao, unidade_stock), localizacoes(nome)").gt("quantidade_atual",0).order("numero_lote"),
+        supabaseClient.from("stock_artigo_sem_lote").select("quantidade_atual, localizacao_id, artigos(designacao, unidade_stock), localizacoes(nome)").gt("quantidade_atual",0),
+    ]);
+    if (erroLote || erroSemLote) { console.error(erroLote || erroSemLote); return; }
+    ultimoStockPorZona = [...(comLote ?? []), ...(semLote ?? []).map(x=>({...x,numero_lote:null}))];
     renderizarStockPorZona();
 }
 
@@ -591,7 +643,7 @@ function renderizarStockPorZona() {
         const tr = document.createElement("tr");
         tr.innerHTML = `
             <td data-rotulo="Artigo">${escaparHtml(l.artigos?.designacao ?? "—")}${l.localizacoes ? `<br><span style="font-size:12px; color:var(--ink-suave);">${escaparHtml(l.localizacoes.nome)}</span>` : ""}</td>
-            <td data-rotulo="Lote" class="mono">${escaparHtml(l.numero_lote)}</td>
+            <td data-rotulo="Lote" class="mono">${l.numero_lote ? escaparHtml(l.numero_lote) : "— sem lote"}</td>
             <td data-rotulo="Quantidade">${l.quantidade_atual} ${escaparHtml(formatarUnidadeStock(l.artigos?.unidade_stock))}</td>
         `;
         corpo.appendChild(tr);
@@ -612,7 +664,7 @@ document.getElementById("btnExportarStockZona").addEventListener("click", async 
     doc.autoTable({
         startY,
         head: [["Zona", "Artigo", "Lote", "Quantidade"]],
-        body: linhas.map((l) => [l.localizacoes?.nome ?? "—", l.artigos?.designacao ?? "—", l.numero_lote, `${l.quantidade_atual} ${formatarUnidadeStock(l.artigos?.unidade_stock)}`]),
+        body: linhas.map((l) => [l.localizacoes?.nome ?? "—", l.artigos?.designacao ?? "—", l.numero_lote ?? "— sem lote", `${l.quantidade_atual} ${formatarUnidadeStock(l.artigos?.unidade_stock)}`]),
         styles: { fontSize: 10, cellPadding: 3 },
         headStyles: ESTILO_CABECALHO_TABELA_PDF,
     });
@@ -628,6 +680,28 @@ document.getElementById("btnPesquisarRastreio").addEventListener("click", async 
     resultadoEl.textContent = "A procurar...";
 
     let html = "";
+    let encontrouR3 = false;
+
+    const { data: internos } = await supabaseClient.from("lotes_internos")
+        .select("id,numero_lote,estado,quantidade_produzida,quantidade_disponivel,unidade_base,validade,artigos(designacao),localizacoes(nome)")
+        .eq("numero_lote", numeroLote);
+    for (const lote of internos ?? []) {
+        encontrouR3=true;
+        const {data:liga}=await supabaseClient.from("lote_interno_origens_internas")
+            .select("quantidade_consumida,unidade_base,pai:lotes_internos!lote_interno_origens_internas_lote_pai_id_fkey(numero_lote,artigos(designacao)),filho:lotes_internos!lote_interno_origens_internas_lote_filho_id_fkey(numero_lote,artigos(designacao))")
+            .or(`lote_filho_id.eq.${lote.id},lote_pai_id.eq.${lote.id}`);
+        html+=`<p style="font-weight:600;margin-top:12px;">Lote interno ${escaparHtml(lote.numero_lote)} · ${escaparHtml(lote.artigos?.designacao??"—")}</p><p>Estado: ${escaparHtml(lote.estado)} · Produzido: ${lote.quantidade_produzida} ${formatarUnidadeStock(lote.unidade_base)} · Saldo: ${lote.quantidade_disponivel} ${formatarUnidadeStock(lote.unidade_base)} · ${escaparHtml(lote.localizacoes?.nome??"sem armazém")}</p>`;
+        if(liga?.length) html+=`<ul>${liga.map(x=>`<li>${x.filho?.numero_lote===lote.numero_lote?"Origem":"Destino"}: ${escaparHtml((x.filho?.numero_lote===lote.numero_lote?x.pai:x.filho)?.artigos?.designacao??"—")} · lote ${escaparHtml((x.filho?.numero_lote===lote.numero_lote?x.pai:x.filho)?.numero_lote??"—")} · ${x.quantidade_consumida} ${formatarUnidadeStock(x.unidade_base)}</li>`).join("")}</ul>`;
+    }
+
+    const {data:comerciais}=await supabaseClient.from("lotes_comerciais")
+        .select("id,numero_lote,validade,quantidade_disponivel,unidade_stock,artigos(designacao),lote_comercial_origens(quantidade_interna_consumida,quantidade_comercial_obtida,lotes_internos(numero_lote))")
+        .eq("numero_lote",numeroLote);
+    for(const lote of comerciais??[]){
+        encontrouR3=true;
+        const {data:uls}=await supabaseClient.from("unidades_logisticas").select("codigo,tipo,estado").eq("lote_comercial_id",lote.id);
+        html+=`<p style="font-weight:600;margin-top:12px;">Lote comercial ${escaparHtml(lote.numero_lote)} · ${escaparHtml(lote.artigos?.designacao??"—")}</p><p>Validade: ${formatarData(lote.validade)} · Disponível: ${lote.quantidade_disponivel} ${formatarUnidadeStock(lote.unidade_stock)}</p><ul>${(lote.lote_comercial_origens??[]).map(o=>`<li>Origem interna ${escaparHtml(o.lotes_internos?.numero_lote??"—")}: ${o.quantidade_interna_consumida} UN → ${o.quantidade_comercial_obtida} ${formatarUnidadeStock(lote.unidade_stock)}</li>`).join("")}${(uls??[]).map(u=>`<li>${escaparHtml(u.tipo)} ${escaparHtml(u.codigo)} · ${escaparHtml(u.estado)}</li>`).join("")}</ul>`;
+    }
 
     const { data: producoes } = await supabaseClient
         .from("lotes_producao")
@@ -661,7 +735,7 @@ document.getElementById("btnPesquisarRastreio").addEventListener("click", async 
             : `<p style="color:var(--ink-suave);">Ainda não foi usado em nenhuma produção.</p>`;
     }
 
-    if (!producoes?.length && !lotesArtigo?.length) {
+    if (!encontrouR3 && !producoes?.length && !lotesArtigo?.length) {
         html = `<p style="color:var(--ink-suave);">Nenhum lote encontrado com esse número.</p>`;
     }
     resultadoEl.innerHTML = html;
@@ -814,16 +888,18 @@ async function carregarLotesPaParaEmbalar(artigoId) {
         return;
     }
     const { data, error } = await supabaseClient
-        .from("lotes_producao")
-        .select("lote_id, numero_lote, quantidade_produzida")
+        .from("lotes_internos")
+        .select("id, numero_lote, quantidade_disponivel")
         .eq("artigo_id", artigoId)
-        .gt("quantidade_produzida", 0)
-        .order("data_producao", { ascending: true });
+        .eq("tipo", "pa")
+        .eq("estado", "disponivel_embalamento")
+        .gt("quantidade_disponivel", 0)
+        .order("produzido_em", { ascending: true });
     if (error) { console.error(error); return; }
 
     select.disabled = false;
     select.innerHTML = data.length
-        ? data.map((l) => `<option value="${l.lote_id}">${escaparHtml(l.numero_lote)} (${l.quantidade_produzida} disponíveis)</option>`).join("")
+        ? data.map((l) => `<option value="${l.id}">${escaparHtml(l.numero_lote)} (${l.quantidade_disponivel} UN disponíveis)</option>`).join("")
         : `<option value="">Sem lotes com stock deste produto</option>`;
 }
 
@@ -832,12 +908,13 @@ document.getElementById("btnAdicionarPlanoEmbalamento").addEventListener("click"
     const loteTexto = document.getElementById("peLote").selectedOptions[0]?.textContent;
     const nomeProduto = document.getElementById("peArtigoTexto").value.trim();
     const quantidade = Number(document.getElementById("peQuantidade").value);
+    const unidade = document.getElementById("peUnidade").value;
     const dataPlano = document.getElementById("peData").value;
 
     if (!loteId || !quantidade || !dataPlano) { toast("Escolhe o produto, o lote, a quantidade e a data.", "erro"); return; }
 
     const { error } = await supabaseClient.from("plano_embalamento").insert({
-        lote_producao_id: loteId, quantidade, data_planeada: dataPlano,
+        lote_interno_id: loteId, quantidade, quantidade_introduzida: quantidade, unidade_introduzida: unidade, data_planeada: dataPlano,
     });
     if (error) { toast("Erro ao adicionar: " + traduzirErro(error.message), "erro"); return; }
 
@@ -854,7 +931,7 @@ async function carregarPlanoEmbalamentoDoDia() {
     if (!dataPlano) return;
     const { data, error } = await supabaseClient
         .from("plano_embalamento")
-        .select("id, quantidade, lotes_producao(numero_lote, produto)")
+        .select("id, quantidade, quantidade_introduzida, unidade_introduzida, unidade_base, lotes_producao(numero_lote, produto), lotes_internos(numero_lote, artigos(designacao))")
         .eq("data_planeada", dataPlano)
         .order("criado_em", { ascending: true });
     if (error) { console.error(error); return; }
@@ -865,9 +942,9 @@ async function carregarPlanoEmbalamentoDoDia() {
     data.forEach((item) => {
         const tr = document.createElement("tr");
         tr.innerHTML = `
-            <td data-rotulo="Produto">${escaparHtml(item.lotes_producao?.produto ?? "—")}</td>
-            <td data-rotulo="Lote" class="mono">${escaparHtml(item.lotes_producao?.numero_lote ?? "—")}</td>
-            <td data-rotulo="Quantidade">${item.quantidade}</td>
+            <td data-rotulo="Produto">${escaparHtml(item.lotes_internos?.artigos?.designacao ?? item.lotes_producao?.produto ?? "—")}</td>
+            <td data-rotulo="Lote" class="mono">${escaparHtml(item.lotes_internos?.numero_lote ?? item.lotes_producao?.numero_lote ?? "—")}</td>
+            <td data-rotulo="Quantidade">${item.quantidade_introduzida ?? item.quantidade} ${formatarUnidadeStock(item.unidade_introduzida ?? item.unidade_base)}${item.quantidade_introduzida && Number(item.quantidade_introduzida)!==Number(item.quantidade)?` → ${item.quantidade} UN`:""}</td>
             <td data-rotulo=""><button class="secundario" data-id="${item.id}" style="padding:4px 10px; font-size:12px;">Remover</button></td>
         `;
         tr.querySelector("button").addEventListener("click", () => removerDoPlanoEmbalamento(item.id));
@@ -883,6 +960,16 @@ async function removerDoPlanoEmbalamento(id) {
 
 document.getElementById("peData").addEventListener("change", carregarPlanoEmbalamentoDoDia);
 
+async function carregarFluxoR3() {
+    const [{data:lotes,error:erroLotes},{data:unidades,error:erroUnidades}]=await Promise.all([
+        supabaseClient.from("lotes_internos").select("numero_lote,estado,quantidade_produzida,quantidade_disponivel,unidade_base,artigos(designacao),localizacoes(nome)").eq("tipo","pa").order("produzido_em",{ascending:false}),
+        supabaseClient.from("unidades_logisticas").select("codigo,tipo,estado,quantidade_conteudo,unidade_conteudo,lotes_comerciais(numero_lote),localizacoes(nome)").neq("estado","expedida").order("criada_em",{ascending:false}),
+    ]);
+    if(erroLotes||erroUnidades){console.error(erroLotes||erroUnidades);return;}
+    document.getElementById("corpoPaInternoR3").innerHTML=(lotes||[]).map(l=>`<tr><td data-rotulo="Artigo">${escaparHtml(l.artigos?.designacao??"—")}</td><td data-rotulo="Lote" class="mono">${escaparHtml(l.numero_lote)}</td><td data-rotulo="Estado">${escaparHtml(l.estado)}</td><td data-rotulo="Produzido">${l.quantidade_produzida} ${formatarUnidadeStock(l.unidade_base)}</td><td data-rotulo="Saldo">${l.quantidade_disponivel} ${formatarUnidadeStock(l.unidade_base)}</td><td data-rotulo="Armazém">${escaparHtml(l.localizacoes?.nome??"—")}</td></tr>`).join("")||`<tr><td colspan="6">Sem lotes internos de PA.</td></tr>`;
+    document.getElementById("corpoUnidadesLogisticasR3").innerHTML=(unidades||[]).map(u=>`<tr><td data-rotulo="Código" class="mono">${escaparHtml(u.codigo)}</td><td data-rotulo="Tipo">${escaparHtml(u.tipo)}</td><td data-rotulo="Estado">${escaparHtml(u.estado)}</td><td data-rotulo="Conteúdo">${u.quantidade_conteudo} ${formatarUnidadeStock(u.unidade_conteudo)}</td><td data-rotulo="Lote">${escaparHtml(u.lotes_comerciais?.numero_lote??"—")}</td><td data-rotulo="Armazém">${escaparHtml(u.localizacoes?.nome??"—")}</td></tr>`).join("")||`<tr><td colspan="6">Sem caixas ou paletes.</td></tr>`;
+}
+
 document.getElementById("btnExportarPlanoEmbalamento").addEventListener("click", async () => {
     if (!itensPlanoEmbalamento.length) { toast("Nada planeado para exportar.", "erro"); return; }
 
@@ -894,7 +981,7 @@ document.getElementById("btnExportarPlanoEmbalamento").addEventListener("click",
     doc.autoTable({
         startY,
         head: [["Produto", "Lote", "Quantidade"]],
-        body: itensPlanoEmbalamento.map((i) => [i.lotes_producao?.produto ?? "—", i.lotes_producao?.numero_lote ?? "—", `${i.quantidade}`]),
+        body: itensPlanoEmbalamento.map((i) => [i.lotes_internos?.artigos?.designacao ?? i.lotes_producao?.produto ?? "—", i.lotes_internos?.numero_lote ?? i.lotes_producao?.numero_lote ?? "—", `${i.quantidade_introduzida ?? i.quantidade} ${formatarUnidadeStock(i.unidade_introduzida ?? i.unidade_base)}`]),
         styles: { fontSize: 11, cellPadding: 4 },
         headStyles: ESTILO_CABECALHO_TABELA_PDF,
     });

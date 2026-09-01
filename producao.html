@@ -87,6 +87,7 @@
                 <div id="ppArtigoResultados" class="lista-sugestoes" style="display:none;"></div>
             </div>
             <input id="ppQuantidade" type="number" min="0.01" step="0.01" placeholder="Quantidade planeada">
+            <select id="ppUnidade" aria-label="Unidade da quantidade planeada"><option value="un">UN</option><option value="pack">PCK</option><option value="kg">KG</option><option value="g">G</option><option value="l">L</option><option value="ml">ML</option><option value="mil">MIL</option><option value="caixa">Caixa</option><option value="palete">Palete</option></select>
         </div>
         <button id="btnAdicionarPlano">Adicionar ao plano</button>
         <table style="margin-top:16px;">
@@ -566,7 +567,7 @@ async function carregarProducaoDiaria() {
 
     const { data, error } = await supabaseClient
         .from("plano_producao")
-        .select("id, quantidade, lote_atribuido_id, artigos(artigo_id, designacao, tipo_produto), lotes_producao(numero_lote, quantidade_produzida)")
+        .select("id, quantidade, lote_atribuido_id, artigos(artigo_id, designacao, tipo_produto, unidade_stock), lotes_producao(numero_lote, quantidade_produzida)")
         .eq("data_planeada", dataPlano)
         .order("criado_em", { ascending: true });
     if (error) { erroEl.textContent = traduzirErro(error.message); return; }
@@ -598,6 +599,7 @@ async function carregarProducaoDiaria() {
                     : `
                         <div class="linha-form" style="margin-top:10px;">
                             <input type="number" min="0.01" step="0.01" placeholder="Quantidade produzida (o que ficou bom)" class="pd-quantidade">
+                            <select class="pd-unidade" aria-label="Unidade produzida"><option value="kg">KG</option><option value="g">G</option><option value="l">L</option><option value="ml">ML</option><option value="mil">MIL</option><option value="un">UN</option></select>
                             <input type="number" min="0" step="0.01" placeholder="Quebras (opcional)" value="0" class="pd-quebras">
                         </div>
                         <input placeholder="Motivo da quebra" class="pd-motivo-quebra" style="display:none; margin-top:8px;">
@@ -607,6 +609,7 @@ async function carregarProducaoDiaria() {
         }
 
         if (!ehPa && !item.lote_atribuido_id) {
+            div.querySelector(".pd-unidade").value = item.artigos?.unidade_stock ?? "kg";
             const campoQuebras = div.querySelector(".pd-quebras");
             const campoMotivo = div.querySelector(".pd-motivo-quebra");
             campoQuebras.addEventListener("input", (e) => {
@@ -624,6 +627,7 @@ async function registarProducaoIntermedio(item, div) {
     erroEl.textContent = "";
 
     const quantidade = Number(div.querySelector(".pd-quantidade").value);
+    const unidade = div.querySelector(".pd-unidade").value;
     const quebras = Number(div.querySelector(".pd-quebras").value) || 0;
     const motivoQuebra = div.querySelector(".pd-motivo-quebra").value.trim();
 
@@ -639,6 +643,8 @@ async function registarProducaoIntermedio(item, div) {
         numero_lote: numeroLote,
         data_producao: dataProducao,
         quantidade_produzida: quantidade,
+        quantidade_introduzida: quantidade,
+        unidade_introduzida: unidade,
         quebras,
         motivo_quebra: motivoQuebra || null,
     }).select("lote_id").single();
@@ -667,7 +673,7 @@ async function carregarPlanoDoDia() {
     const dataPlano = document.getElementById("ppData").value;
     const { data, error } = await supabaseClient
         .from("plano_producao")
-        .select("id, artigo_id, quantidade, lote_atribuido_id, artigos(designacao, tipo_produto)")
+        .select("id, artigo_id, quantidade, quantidade_introduzida, unidade_introduzida, unidade_base, lote_atribuido_id, artigos(designacao, tipo_produto)")
         .eq("data_planeada", dataPlano)
         .order("criado_em", { ascending: true });
     if (error) { console.error(error); return; }
@@ -695,7 +701,7 @@ async function carregarPlanoDoDia() {
         }
         tr.innerHTML = `
             <td data-rotulo="Produto">${escaparHtml(l.artigos?.designacao ?? "—")}</td>
-            <td data-rotulo="Quantidade">${l.quantidade}</td>
+            <td data-rotulo="Quantidade">${l.quantidade_introduzida ?? l.quantidade} ${formatarUnidadeStock(l.unidade_introduzida ?? l.unidade_base)}${l.quantidade_introduzida && Number(l.quantidade_introduzida)!==Number(l.quantidade) ? ` → ${l.quantidade} ${formatarUnidadeStock(l.unidade_base)}` : ""}</td>
             <td data-rotulo="PA — lote atribuído">${celulaAtribuicao}</td>
             <td data-rotulo=""><button class="secundario" data-id="${l.id}" style="padding:4px 10px; font-size:12px;">Remover</button></td>
         `;
@@ -727,12 +733,13 @@ document.getElementById("ppData").addEventListener("change", carregarPlanoDoDia)
 document.getElementById("btnAdicionarPlano").addEventListener("click", async () => {
     const artigoId = document.getElementById("ppArtigo").value;
     const quantidade = Number(document.getElementById("ppQuantidade").value);
+    const unidade = document.getElementById("ppUnidade").value;
     const dataPlano = document.getElementById("ppData").value;
     if (!artigoId || !quantidade || !dataPlano) return;
 
     const { error } = await supabaseClient
         .from("plano_producao")
-        .insert({ artigo_id: artigoId, quantidade, data_planeada: dataPlano });
+        .insert({ artigo_id: artigoId, quantidade, quantidade_introduzida: quantidade, unidade_introduzida: unidade, data_planeada: dataPlano });
     if (error) { toast("Erro ao adicionar: " + traduzirErro(error.message), "erro"); return; }
 
     document.getElementById("ppQuantidade").value = "";

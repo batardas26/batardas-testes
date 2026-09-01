@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TESTES — Início — Batardas</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<link rel="icon" href="img/logo.png" type="image/png"><link rel="stylesheet" href="css/style.css">
+</head>
+<body class="pagina-inicio">
+<aside class="ambiente-testes">BATARDAS · TESTES — R3</aside>
+<header class="inicio-topo">
+    <div class="inicio-marca"><img src="img/logo.png" alt="Batardas"><div><strong>Centro operacional</strong><small>Início e fecho de turno</small></div></div>
+    <div><span class="utilizador" id="nomeUtilizador"></span><button class="secundario" onclick="terminarSessao()">Sair</button></div>
+</header>
+<main class="inicio-conteudo">
+    <section class="inicio-boas-vindas">
+        <div><p class="inicio-data" id="dataHoje"></p><h1 id="saudacao">Bom trabalho.</h1><p>Regista o plano no início, as exceções quando acontecem e confirma os valores reais no fim do turno.</p></div>
+        <span class="badge-r3">R3 · TESTES</span>
+    </section>
+
+    <section class="inicio-grelha-resumo" aria-label="Resumo operacional">
+        <article class="inicio-kpi"><span>Movimentos por enviar</span><strong id="kpiEnvio">—</strong><small>Estado do e-mail, separado do Primavera</small></article>
+        <article class="inicio-kpi"><span>Lotes internos disponíveis</span><strong id="kpiLotes">—</strong><small>Saldo positivo e elegível</small></article>
+        <article class="inicio-kpi"><span>PA por embalar</span><strong id="kpiEmbalar">—</strong><small>Sempre contado em UN</small></article>
+        <article class="inicio-kpi"><span>Caixas em stock</span><strong id="kpiCaixas">—</strong><small>Fechadas; palete completa ou incompleta</small></article>
+    </section>
+
+    <section class="inicio-duas-colunas">
+        <div class="cartao">
+            <h2>Abrir módulo</h2>
+            <div id="modulosDisponiveis" class="grelha-modulos"></div>
+        </div>
+        <div class="cartao">
+            <h2>Checklist do turno</h2>
+            <label class="check-turno"><input type="checkbox" data-check="plano"> Rever encomendas, reservas e plano</label>
+            <label class="check-turno"><input type="checkbox" data-check="materiais"> Confirmar materiais e lotes elegíveis</label>
+            <label class="check-turno"><input type="checkbox" data-check="reais"> Registar quantidades reais, quebras e exceções</label>
+            <label class="check-turno"><input type="checkbox" data-check="passagens"> Confirmar passagens entre Produção e Armazém</label>
+            <label class="check-turno"><input type="checkbox" data-check="email"> Enviar movimentos ainda não enviados</label>
+            <p class="nota-turno">A checklist orienta o trabalho; não altera stock e não fecha registos automaticamente.</p>
+        </div>
+    </section>
+</main>
+<script src="js/supabaseClient.js"></script>
+<script>
+const MODULOS = [
+    { roles:["admin"], nome:"Administração", href:"admin.html", icon:"settings" },
+    { roles:["producao","admin"], nome:"Produção", href:"producao.html", icon:"chef-hat" },
+    { roles:["armazem","admin"], nome:"Armazém e embalamento", href:"armazem.html", icon:"building-warehouse" },
+    { roles:["consulta","admin"], nome:"Consulta", href:"consulta.html", icon:"chart-bar" },
+    { roles:["qualidade","admin"], nome:"Qualidade", href:"qualidade.html", icon:"clipboard-check" },
+    { roles:["manutencao","admin"], nome:"Manutenção", href:"manutencao.html", icon:"tool" },
+    { roles:["admin","producao","armazem","qualidade"], nome:"Artigos, lotes e validade", href:"modelo-artigos-lotes.html", icon:"route" },
+];
+
+async function iniciarHomepage() {
+    const session = await exigirSessao(); if (!session) return;
+    const perfil = await obterPerfil(session.user.id); if (!perfil) return;
+    if (!perfil.perfil_completo) { location.href="completar-perfil.html"; return; }
+    document.getElementById("nomeUtilizador").textContent = perfil.nome;
+    const acessos = new Set([perfil.role, ...(perfil.acessosExtra||[])]);
+    document.getElementById("modulosDisponiveis").innerHTML = MODULOS.filter(m => m.roles.some(r=>acessos.has(r))).map(m =>
+        `<a class="cartao-modulo" href="${m.href}"><i class="ti ti-${m.icon}"></i><span>${escaparHtml(m.nome)}</span><i class="ti ti-chevron-right"></i></a>`
+    ).join("");
+    const agora = new Date();
+    document.getElementById("dataHoje").textContent = agora.toLocaleDateString("pt-PT", {weekday:"long", day:"numeric", month:"long"});
+    document.getElementById("saudacao").textContent = `${agora.getHours()<13?"Bom dia":agora.getHours()<20?"Boa tarde":"Boa noite"}, ${perfil.nome.split(" ")[0]}.`;
+
+    const [envios,enviosSemLote,lotes,embalar,caixas] = await Promise.all([
+        supabaseClient.from("movimentos_stock").select("*",{count:"exact",head:true}).eq("responsavel",session.user.id).in("estado_envio_email",["por_enviar","falhou"]),
+        supabaseClient.from("movimentos_stock_sem_lote").select("*",{count:"exact",head:true}).eq("responsavel",session.user.id).in("estado_envio_email",["por_enviar","falhou"]),
+        supabaseClient.from("lotes_internos").select("*",{count:"exact",head:true}).gt("quantidade_disponivel",0).neq("estado","esgotado"),
+        supabaseClient.from("lotes_internos").select("quantidade_disponivel").eq("tipo","pa").eq("estado","disponivel_embalamento"),
+        supabaseClient.from("unidades_logisticas").select("*",{count:"exact",head:true}).eq("tipo","caixa").eq("estado","fechada"),
+    ]);
+    document.getElementById("kpiEnvio").textContent=(envios.count??0)+(enviosSemLote.count??0);
+    document.getElementById("kpiLotes").textContent=lotes.count??0;
+    document.getElementById("kpiEmbalar").textContent=(embalar.data||[]).reduce((s,x)=>s+Number(x.quantidade_disponivel),0)+" UN";
+    document.getElementById("kpiCaixas").textContent=caixas.count??0;
+
+    const chave=`batardas_check_turno_${agora.toISOString().slice(0,10)}_${session.user.id}`;
+    let estado={}; try { estado=JSON.parse(localStorage.getItem(chave)||"{}"); } catch {}
+    document.querySelectorAll("[data-check]").forEach(c=>{c.checked=!!estado[c.dataset.check]; c.addEventListener("change",()=>{estado[c.dataset.check]=c.checked;localStorage.setItem(chave,JSON.stringify(estado));});});
+}
+iniciarHomepage();
+</script>
+</body></html>

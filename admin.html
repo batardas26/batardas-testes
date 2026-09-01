@@ -176,6 +176,7 @@
                 <div id="rpArtigoResultados" class="lista-sugestoes" style="display:none;"></div>
             </div>
             <input id="rpQuantidade" type="number" min="0.01" step="0.01" placeholder="Quantidade produzida (o que ficou bom)">
+            <select id="rpUnidade" aria-label="Unidade produzida"><option value="un">UN</option><option value="pack">PCK</option><option value="kg">KG</option><option value="g">G</option><option value="l">L</option><option value="ml">ML</option><option value="mil">MIL</option></select>
         </div>
         <div class="linha-form">
             <input id="rpQuebras" type="number" min="0" step="0.01" placeholder="Quebras (opcional)" value="0">
@@ -188,7 +189,7 @@
     <div class="cartao">
         <h2>Criar lote comercial</h2>
         <p style="font-size:13px; color:var(--ink-suave); margin-top:-8px;">
-            O número que vai na embalagem (ex. "26P08") — normalmente um por mês, por artigo. Fica vazio até seres abastecido por uma ou mais produções.
+            O número é calculado com a fórmula do Excel: AA + categoria + dia ISO + nº de produção + dia juliano. A validade é sempre a data de referência + 365 dias.
         </p>
         <div class="linha-form">
             <div class="campo-pesquisa-artigo">
@@ -196,8 +197,11 @@
                 <input type="hidden" id="lcArtigo">
                 <div id="lcArtigoResultados" class="lista-sugestoes" style="display:none;"></div>
             </div>
-            <input id="lcNumeroLote" placeholder="Número do lote comercial (ex. 26P08)">
+            <input id="lcDataProducao" type="date" aria-label="Data de referência da produção">
+            <select id="lcCategoria"><option value="P">P</option><option value="R">R</option><option value="S">S</option></select>
+            <select id="lcNumeroProducao"><option value="1">Produção 1</option><option value="2">Produção 2</option><option value="3">Produção 3</option><option value="4">Produção 4</option><option value="5">Produção 5</option><option value="6">Produção 6</option><option value="7">Produção 7</option><option value="8">Produção 8</option><option value="9">Produção 9</option></select>
         </div>
+        <div id="lcPrevisualizacao" class="resumo-operacao">Preenche a data para pré-visualizar o código e a validade.</div>
         <button id="btnCriarLoteComercial">Criar lote comercial</button>
         <p id="erroLoteComercial" class="erro"></p>
     </div>
@@ -213,6 +217,7 @@
         </div>
         <div class="linha-form">
             <input id="abQuantidade" type="number" min="0.01" step="0.01" placeholder="Quantidade a passar para o lote comercial">
+            <select id="abUnidade"><option value="un">UN</option><option value="pack">PCK</option><option value="caixa">Caixa</option></select>
             <button id="btnAbastecer">Abastecer</button>
         </div>
         <p id="erroAbastecer" class="erro"></p>
@@ -508,6 +513,7 @@
                 <div id="pExtraArtigoResultados" class="lista-sugestoes" style="display:none;"></div>
             </div>
             <input id="pExtraQuantidade" type="number" min="0.01" step="0.01" placeholder="Quantidade">
+            <select id="pExtraUnidade" aria-label="Unidade da quantidade"><option value="un">UN</option><option value="pack">PCK</option><option value="kg">KG</option><option value="g">G</option><option value="l">L</option><option value="ml">ML</option><option value="mil">MIL</option><option value="caixa">Caixa</option><option value="palete">Palete</option></select>
         </div>
         <div class="linha-form">
             <input id="pExtraMotivo" placeholder="Motivo (ex. reforço de stock antes de época alta)">
@@ -979,7 +985,7 @@ async function carregarPlaneamentoSemanal() {
     // Produção extra planeada manualmente para esta semana
     const { data: extra, error: erroExtra } = await supabaseClient
         .from("producao_extra_planeada")
-        .select("id, produto, quantidade, motivo")
+        .select("id, produto, quantidade, quantidade_introduzida, unidade_introduzida, unidade_base, motivo")
         .eq("semana_inicio", isoSegunda)
         .order("criado_em", { ascending: false });
     if (erroExtra) { console.error(erroExtra); return; }
@@ -990,7 +996,7 @@ async function carregarPlaneamentoSemanal() {
     extra.forEach((e) => {
         const div = document.createElement("div");
         div.style.cssText = "padding:8px 0; border-bottom:0.5px solid var(--linha); font-size:14px;";
-        div.innerHTML = `<strong>${escaparHtml(e.produto)}</strong> — ${e.quantidade}${e.motivo ? ` <span style="font-size:12px; color:var(--ink-suave);">(${escaparHtml(e.motivo)})</span>` : ""}`;
+        div.innerHTML = `<strong>${escaparHtml(e.produto)}</strong> — ${e.quantidade_introduzida ?? e.quantidade} ${formatarUnidadeStock(e.unidade_introduzida ?? e.unidade_base)}${e.quantidade_introduzida && Number(e.quantidade_introduzida)!==Number(e.quantidade) ? ` → ${e.quantidade} ${formatarUnidadeStock(e.unidade_base)}` : ""}${e.motivo ? ` <span style="font-size:12px; color:var(--ink-suave);">(${escaparHtml(e.motivo)})</span>` : ""}`;
         blocoExtra.appendChild(div);
     });
 }
@@ -1009,7 +1015,7 @@ async function carregarPlanoDoDiaAdmin() {
     const dataPlano = document.getElementById("ppData").value;
     const { data, error } = await supabaseClient
         .from("plano_producao")
-        .select("artigo_id, quantidade, artigos(designacao)")
+        .select("artigo_id, quantidade, quantidade_introduzida, unidade_introduzida, unidade_base, artigos(designacao)")
         .eq("data_planeada", dataPlano)
         .order("criado_em", { ascending: true });
     if (error) { console.error(error); return; }
@@ -1019,7 +1025,7 @@ async function carregarPlanoDoDiaAdmin() {
         `<tr><td colspan="2" style="text-align:center; color:var(--ink-suave);">Ainda não foi planeado nada para este dia.</td></tr>`;
     data.forEach((l) => {
         const tr = document.createElement("tr");
-        tr.innerHTML = `<td data-rotulo="Produto">${escaparHtml(l.artigos?.designacao ?? "—")}</td><td data-rotulo="Quantidade">${l.quantidade}</td>`;
+        tr.innerHTML = `<td data-rotulo="Produto">${escaparHtml(l.artigos?.designacao ?? "—")}</td><td data-rotulo="Quantidade">${l.quantidade_introduzida ?? l.quantidade} ${formatarUnidadeStock(l.unidade_introduzida ?? l.unidade_base)}${l.quantidade_introduzida && Number(l.quantidade_introduzida)!==Number(l.quantidade) ? ` → ${l.quantidade} ${formatarUnidadeStock(l.unidade_base)}` : ""}</td>`;
         corpo.appendChild(tr);
     });
 
@@ -1066,8 +1072,10 @@ document.getElementById("btnExportarNecessidades").addEventListener("click", asy
     doc.save(`materias_primas_necessarias_${dataPlano}.pdf`);
 });
 
-document.getElementById("btnProducaoExtra").addEventListener("click", async () => {    const artigoId = document.getElementById("pExtraArtigo").value;
+document.getElementById("btnProducaoExtra").addEventListener("click", async () => {
+    const artigoId = document.getElementById("pExtraArtigo").value;
     const quantidade = Number(document.getElementById("pExtraQuantidade").value);
+    const unidade = document.getElementById("pExtraUnidade").value;
     const motivo = document.getElementById("pExtraMotivo").value.trim();
     if (!artigoId || !quantidade) return;
 
@@ -1081,6 +1089,8 @@ document.getElementById("btnProducaoExtra").addEventListener("click", async () =
             artigo_id: artigoId,
             produto: produtoSelecionado,
             quantidade,
+            quantidade_introduzida: quantidade,
+            unidade_introduzida: unidade,
             semana_inicio: segunda.toISOString().slice(0, 10),
             motivo: motivo || null,
         });
@@ -1166,6 +1176,7 @@ document.getElementById("btnRegistarProducaoAdmin").addEventListener("click", as
     const artigoId = document.getElementById("rpArtigo").value;
     const artigo = artigoId ? await obterArtigoPorId(artigoId) : null;
     const quantidade = Number(document.getElementById("rpQuantidade").value);
+    const unidade = document.getElementById("rpUnidade").value;
     const quebras = Number(document.getElementById("rpQuebras").value) || 0;
     const motivoQuebra = document.getElementById("rpMotivoQuebra").value.trim();
 
@@ -1178,6 +1189,8 @@ document.getElementById("btnRegistarProducaoAdmin").addEventListener("click", as
         numero_lote: gerarLoteInternoAdmin(),
         data_producao: new Date().toISOString().slice(0, 10),
         quantidade_produzida: quantidade,
+        quantidade_introduzida: quantidade,
+        unidade_introduzida: unidade,
         quebras,
         motivo_quebra: motivoQuebra || null,
     });
@@ -1229,21 +1242,38 @@ document.getElementById("btnCriarArtigo").addEventListener("click", async () => 
     _cacheArtigos = null; // força a pesquisa de artigos a refrescar com o novo
 });
 
-// --- Criar lote comercial ---------------------------------------------------
+// --- Criar lote comercial: fórmula idêntica ao Excel ------------------------
+function atualizarPrevisualizacaoLoteComercial() {
+    const data = document.getElementById("lcDataProducao").value;
+    const categoria = document.getElementById("lcCategoria").value;
+    const numero = Number(document.getElementById("lcNumeroProducao").value);
+    document.getElementById("lcPrevisualizacao").textContent = data
+        ? `Código: ${calcularCodigoLote(data, categoria, numero)} · Validade: ${formatarData(calcularValidadePadrao(data))}`
+        : "Preenche a data para pré-visualizar o código e a validade.";
+}
+document.getElementById("lcDataProducao").valueAsDate = new Date();
+["lcDataProducao", "lcCategoria", "lcNumeroProducao"].forEach((id) => document.getElementById(id).addEventListener("change", atualizarPrevisualizacaoLoteComercial));
+atualizarPrevisualizacaoLoteComercial();
+
 document.getElementById("btnCriarLoteComercial").addEventListener("click", async () => {
     const erroEl = document.getElementById("erroLoteComercial");
     erroEl.textContent = "";
 
     const artigoId = document.getElementById("lcArtigo").value;
-    const numeroLote = document.getElementById("lcNumeroLote").value.trim();
-    if (!artigoId || !numeroLote) { erroEl.textContent = "Escolhe o artigo e escreve o número do lote."; return; }
+    const dataProducao = document.getElementById("lcDataProducao").value;
+    const categoria = document.getElementById("lcCategoria").value;
+    const numero = Number(document.getElementById("lcNumeroProducao").value);
+    if (!artigoId || !dataProducao) { erroEl.textContent = "Escolhe o artigo e a data de referência."; return; }
 
-    const { error } = await supabaseClient.from("lotes_comerciais").insert({ artigo_id: artigoId, numero_lote: numeroLote });
+    const { error } = await supabaseClient.rpc("criar_lote_comercial_r3", {
+        p_artigo_id: artigoId, p_data_producao: dataProducao,
+        p_categoria: categoria, p_numero_producao: numero,
+        p_apresentacao_id: null,
+    });
     if (error) { erroEl.textContent = "Erro ao criar: " + traduzirErro(error.message); return; }
 
     document.getElementById("lcArtigoTexto").value = "";
     document.getElementById("lcArtigo").value = "";
-    document.getElementById("lcNumeroLote").value = "";
     toast("Lote comercial criado.", "sucesso");
     carregarLotes();
     carregarLotesComerciaisParaAbastecer();
@@ -1271,17 +1301,22 @@ document.getElementById("abLoteComercial").addEventListener("change", async (e) 
         return;
     }
     const { data, error } = await supabaseClient
-        .from("lotes_producao")
-        .select("lote_id, numero_lote, quantidade_produzida")
+        .from("lotes_internos")
+        .select("id, numero_lote, quantidade_disponivel")
         .eq("artigo_id", artigoId)
-        .gt("quantidade_produzida", 0)
-        .order("data_producao", { ascending: true });
+        .eq("tipo", "pa")
+        .eq("estado", "disponivel_embalamento")
+        .gt("quantidade_disponivel", 0)
+        .order("produzido_em", { ascending: true });
     if (error) { console.error(error); return; }
 
     select.disabled = false;
     select.innerHTML = data.length
-        ? data.map((l) => `<option value="${l.lote_id}">${escaparHtml(l.numero_lote)} (${l.quantidade_produzida} disponíveis)</option>`).join("")
+        ? data.map((l) => `<option value="${l.id}">${escaparHtml(l.numero_lote)} (${l.quantidade_disponivel} UN disponíveis)</option>`).join("")
         : `<option value="">Sem produção com stock deste artigo</option>`;
+    const [{data:artigo},{data:conversoes}]=await Promise.all([supabaseClient.from("artigos").select("unidade_stock").eq("artigo_id",artigoId).single(),supabaseClient.from("conversoes_artigo").select("unidade_origem").eq("artigo_id",artigoId).eq("ativo",true)]);
+    const unidades=[...new Set([artigo?.unidade_stock,...(conversoes??[]).map(c=>c.unidade_origem)].filter(Boolean))];
+    document.getElementById("abUnidade").innerHTML=unidades.map(u=>`<option value="${escaparHtml(u)}">${formatarUnidadeStock(u)}</option>`).join("");
 });
 
 document.getElementById("btnAbastecer").addEventListener("click", async () => {
@@ -1291,14 +1326,16 @@ document.getElementById("btnAbastecer").addEventListener("click", async () => {
     const loteComercialId = document.getElementById("abLoteComercial").value;
     const loteProducaoId = document.getElementById("abLoteProducao").value;
     const quantidade = Number(document.getElementById("abQuantidade").value);
+    const unidade = document.getElementById("abUnidade").value;
 
     if (!loteComercialId || !loteProducaoId || !quantidade) {
         erroEl.textContent = "Escolhe o lote comercial, a produção de origem, e a quantidade.";
         return;
     }
 
-    const { error } = await supabaseClient.from("abastecimento_lote_comercial").insert({
-        lote_comercial_id: loteComercialId, lote_producao_id: loteProducaoId, quantidade,
+    const { error } = await supabaseClient.rpc("embalar_lote_interno_r3", {
+        p_lote_comercial:loteComercialId,p_lote_interno:loteProducaoId,
+        p_quantidade:quantidade,p_unidade:unidade,p_embalado_em:new Date().toISOString(),
     });
     if (error) { erroEl.textContent = "Erro ao abastecer: " + traduzirErro(error.message); return; }
 

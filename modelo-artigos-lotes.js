@@ -16,11 +16,11 @@ async function iniciarModelo() {
     if (!ctxModelo) return;
     const { perfil } = ctxModelo;
     document.getElementById("nomeUtilizador").textContent = perfil.nome || perfil.nome_utilizador;
-    document.getElementById("voltarModulo").href = ROTA_POR_ROLE[perfil.role] ?? "index.html";
+    document.getElementById("voltarModulo").href = "inicio.html";
     if (perfil.super_admin) document.querySelectorAll(".config-admin").forEach((el) => { el.style.display = ""; });
     document.getElementById("trInicio").value = isoLocal();
     document.getElementById("trFim").value = isoLocal();
-    await Promise.all([carregarLotesModelo(), carregarRegrasModelo(), carregarZonasModelo(), carregarFamilias(), carregarFormatos(), carregarTransformacoes()]);
+    await Promise.all([carregarLotesModelo(), carregarRegrasModelo(), carregarZonasModelo(), carregarFamilias(), carregarFormatos(), carregarTransformacoes(), carregarHistoricoR3()]);
     await Promise.all([
         activarPesquisaArtigo("uaArtigoTexto", "uaArtigo", "uaArtigoResultados", carregarEstadoArtigo),
         activarPesquisaArtigo("cvArtigoTexto", "cvArtigo", "cvArtigoResultados", carregarConversoesArtigo),
@@ -160,16 +160,30 @@ async function carregarRegrasModelo() {
 async function carregarZonasModelo() {
     const { data } = await supabaseClient.from("localizacoes").select("localizacao_id, nome").order("nome");
     document.getElementById("trDestino").innerHTML = `<option value="">Armazém de destino...</option>` + (data ?? []).map((z) => `<option value="${z.localizacao_id}">${escaparHtml(z.nome)}</option>`).join("");
+    document.getElementById("histArmazem").innerHTML = `<option value="">Todos os armazéns</option>` + (data ?? []).map((z) => `<option value="${z.localizacao_id}">${escaparHtml(z.nome)}</option>`).join("");
 }
 
 async function carregarLotesModelo() {
     const { data, error } = await supabaseClient.from("lotes_artigo").select("lote_artigo_id, artigo_id, numero_lote, quantidade_atual, validade, validade_hora, apresentacao, estado_conservacao, estado_qualidade, localizacao_id, artigos(designacao, unidade_stock, configuracao_unidades_confirmada, familia_validade_id), localizacoes(nome)").gt("quantidade_atual", 0).eq("estado_qualidade", "disponivel").order("criado_em", { ascending: true });
     if (error) { console.error(error); return; }
     lotesModelo = data ?? [];
-    const opcoes = lotesModelo.map((l) => `<option value="${l.lote_artigo_id}">${escaparHtml(l.artigos?.designacao ?? "—")} · ${escaparHtml(l.numero_lote)} · ${l.quantidade_atual} ${unidadeVisivel(l.artigos?.unidade_stock)} · ${escaparHtml(l.localizacoes?.nome ?? "sem armazém")}</option>`).join("");
-    document.getElementById("trLote").innerHTML = `<option value="">Lote de origem...</option>` + opcoes;
-    document.getElementById("clLote").innerHTML = `<option value="">Lote...</option>` + opcoes;
+    const artigos=[...new Map(lotesModelo.map(l=>[l.artigo_id,l.artigos?.designacao??"—"])).entries()].sort((a,b)=>a[1].localeCompare(b[1]));
+    const todosArtigos=await obterTodosArtigos();
+    const opcoesArtigo=`<option value="">1. Escolhe primeiro o artigo...</option>`+artigos.map(([id,n])=>`<option value="${id}">${escaparHtml(n)}</option>`).join("");
+    document.getElementById("trArtigo").innerHTML=opcoesArtigo;
+    document.getElementById("clArtigo").innerHTML=opcoesArtigo;
+    document.getElementById("histArtigo").innerHTML=`<option value="">Todos os artigos</option>`+todosArtigos.map(a=>`<option value="${a.artigo_id}">${escaparHtml(a.designacao)}</option>`).join("");
+    preencherLotesDoArtigo("trArtigo","trLote"); preencherLotesDoArtigo("clArtigo","clLote");
 }
+
+function preencherLotesDoArtigo(idArtigo,idLote) {
+    const artigoId=document.getElementById(idArtigo).value, select=document.getElementById(idLote);
+    const elegiveis=lotesModelo.filter(l=>l.artigo_id===artigoId && Number(l.quantidade_atual)>0);
+    select.disabled=!artigoId;
+    select.innerHTML=!artigoId?`<option value="">2. Escolhe primeiro o artigo</option>`:`<option value="">2. Escolhe o lote...</option>`+elegiveis.map(l=>`<option value="${l.lote_artigo_id}">${escaparHtml(l.numero_lote)} · ${l.quantidade_atual} ${unidadeVisivel(l.artigos?.unidade_stock)} · ${escaparHtml(l.localizacoes?.nome??"sem armazém")}</option>`).join("");
+}
+document.getElementById("trArtigo").addEventListener("change",()=>preencherLotesDoArtigo("trArtigo","trLote"));
+document.getElementById("clArtigo").addEventListener("change",()=>preencherLotesDoArtigo("clArtigo","clLote"));
 
 document.getElementById("btnClassificarLote").addEventListener("click", async () => {
     erroModelo("erroClassificar");
@@ -208,5 +222,17 @@ async function carregarTransformacoes() {
     if (error) { console.error(error); return; }
     document.getElementById("corpoTransformacoes").innerHTML = (data ?? []).map((t) => `<tr><td>${new Date(t.criado_em).toLocaleString("pt-PT")}</td><td>${escaparHtml(t.origem?.numero_lote ?? "—")}</td><td>${escaparHtml(t.operacao)}</td><td>${escaparHtml(t.destino?.numero_lote ?? "—")}</td><td>${t.quantidade_origem} → ${t.quantidade_destino} ${unidadeVisivel(t.unidade_stock)}</td><td>${formatarData(t.destino?.validade)}</td></tr>`).join("") || `<tr><td colspan="6">Sem transformações.</td></tr>`;
 }
+
+async function carregarHistoricoR3() {
+    let q=supabaseClient.from("historico_lotes_r3").select("*").order("ocorrido_em",{ascending:false}).limit(250);
+    const artigo=document.getElementById("histArtigo")?.value, lote=document.getElementById("histLote")?.value.trim(), armazem=document.getElementById("histArmazem")?.value;
+    if(artigo) q=q.eq("artigo_id",artigo); if(lote) q=q.ilike("numero_lote",`%${lote}%`); if(armazem) q=q.eq("localizacao_id",armazem);
+    const {data,error}=await q; if(error){console.error(error);return;}
+    const artigoIds=[...new Set((data||[]).map(x=>x.artigo_id))], zonaIds=[...new Set((data||[]).map(x=>x.localizacao_id).filter(Boolean))];
+    const [{data:arts},{data:zonas}]=await Promise.all([supabaseClient.from("artigos").select("artigo_id,designacao").in("artigo_id",artigoIds.length?artigoIds:["00000000-0000-0000-0000-000000000000"]),supabaseClient.from("localizacoes").select("localizacao_id,nome").in("localizacao_id",zonaIds.length?zonaIds:["00000000-0000-0000-0000-000000000000"])]);
+    const am=new Map((arts||[]).map(x=>[x.artigo_id,x.designacao])), zm=new Map((zonas||[]).map(x=>[x.localizacao_id,x.nome]));
+    document.getElementById("corpoHistoricoR3").innerHTML=(data||[]).map(x=>`<tr><td data-rotulo="Data">${new Date(x.ocorrido_em).toLocaleString("pt-PT")}</td><td data-rotulo="Artigo">${escaparHtml(am.get(x.artigo_id)||"—")}</td><td data-rotulo="Lote">${escaparHtml(x.numero_lote)}</td><td data-rotulo="Armazém">${escaparHtml(zm.get(x.localizacao_id)||"—")}</td><td data-rotulo="Movimento">${escaparHtml(x.movimento)}</td><td data-rotulo="Quantidade">${x.quantidade} ${unidadeVisivel(x.unidade)}</td></tr>`).join("")||`<tr><td colspan="6">Sem movimentos para os filtros escolhidos.</td></tr>`;
+}
+document.getElementById("btnAplicarHistorico").addEventListener("click",carregarHistoricoR3);
 
 iniciarModelo();

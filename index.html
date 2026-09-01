@@ -73,7 +73,7 @@ async function tentarLogin() {
         window.location.href = "completar-perfil.html";
         return;
     }
-    window.location.href = ROTA_POR_ROLE[perfil.role] ?? "consulta.html";
+    window.location.href = "inicio.html";
 }
 
 document.getElementById("btnLogin").addEventListener("click", tentarLogin);
@@ -103,7 +103,7 @@ if (utilizadorLembrado) {
     if (session) {
         const perfil = await obterPerfil(session.user.id);
         if (perfil && !perfil.perfil_completo) { window.location.href = "completar-perfil.html"; return; }
-        if (perfil) window.location.href = ROTA_POR_ROLE[perfil.role] ?? "consulta.html";
+        if (perfil) window.location.href = "inicio.html";
     }
 })();
 </script>

@@ -8,16 +8,16 @@
 <link rel="icon" href="img/logo.png" type="image/png"><link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<aside class="ambiente-testes">BATARDAS · TESTES — BLOCO 1+2</aside>
+<aside class="ambiente-testes">BATARDAS · TESTES — R3</aside>
 <div class="layout-admin">
 <nav class="barra-lateral">
-    <div class="marca"><img class="logo" src="img/logo.png" alt="Batardas"></div>
+    <div class="marca"><img class="logo" src="img/logo.png" alt="Batardas" style="cursor:pointer" onclick="irParaInicio()"></div>
     <button class="nav-item activo" data-secao="transformar"><i class="ti ti-arrows-transfer-up"></i> Transformar lote</button>
     <button class="nav-item" data-secao="rastrear"><i class="ti ti-route"></i> Lotes derivados</button>
     <button class="nav-item config-admin" data-secao="unidades" style="display:none;"><i class="ti ti-ruler-measure"></i> Unidades</button>
     <button class="nav-item config-admin" data-secao="formatos" style="display:none;"><i class="ti ti-packages"></i> Formatos</button>
     <button class="nav-item config-admin" data-secao="validades" style="display:none;"><i class="ti ti-calendar-time"></i> Validades</button>
-    <a class="nav-item" id="voltarModulo" href="index.html" style="text-decoration:none;"><i class="ti ti-arrow-left"></i> Voltar</a>
+    <a class="nav-item" id="voltarModulo" href="inicio.html" style="text-decoration:none;"><i class="ti ti-home"></i> Início</a>
 </nav>
 <div class="conteudo-admin">
 <header><h1 id="tituloSecao">Transformar lote</h1><div><span class="utilizador" id="nomeUtilizador"></span><button class="secundario" onclick="terminarSessao()">Sair</button></div></header>
@@ -27,13 +27,13 @@
     <div class="cartao">
         <h2>Classificar lote existente</h2>
         <p style="font-size:13px; color:var(--ink-suave);">Passo único para lotes que já existiam antes deste módulo. Apenas completa apresentação/estado; não altera a quantidade.</p>
-        <div class="linha-form"><select id="clLote"><option value="">Lote...</option></select><input id="clApresentacao" placeholder="Apresentação (ex. inteira, 4.ª gama)"><select id="clEstado"><option value="fresco">Fresco</option><option value="refrigerado">Refrigerado</option><option value="congelado">Congelado</option><option value="descongelado">Descongelado</option><option value="ambiente">Ambiente</option></select><input id="clFornecedor" placeholder="Lote do fornecedor (se aplicável)"></div>
+        <div class="linha-form"><select id="clArtigo"><option value="">1. Escolhe primeiro o artigo...</option></select><select id="clLote" disabled><option value="">2. Escolhe primeiro o artigo</option></select><input id="clApresentacao" placeholder="Apresentação (ex. inteira, 4.ª gama)"><select id="clEstado"><option value="fresco">Fresco</option><option value="refrigerado">Refrigerado</option><option value="congelado">Congelado</option><option value="descongelado">Descongelado</option><option value="ambiente">Ambiente</option></select><input id="clFornecedor" placeholder="Lote do fornecedor (se aplicável)"></div>
         <button id="btnClassificarLote">Guardar classificação</button><p id="erroClassificar" class="erro"></p>
     </div>
     <div class="cartao">
         <h2>Transformação rastreável</h2>
         <p style="font-size:13px; color:var(--ink-suave);">Exemplo: cenoura fresca/refrigerada → cenoura congelada. A confirmação desconta apenas a quantidade escolhida do lote de origem e cria um lote interno derivado.</p>
-        <div class="linha-form"><select id="trLote"><option value="">Lote de origem...</option></select><select id="trRegra" disabled><option value="">Escolhe primeiro o lote</option></select><select id="trDestino"><option value="">Armazém de destino...</option></select></div>
+        <div class="linha-form"><select id="trArtigo"><option value="">1. Escolhe primeiro o artigo...</option></select><select id="trLote" disabled><option value="">2. Escolhe primeiro o artigo</option></select><select id="trRegra" disabled><option value="">3. Escolhe primeiro o lote</option></select><select id="trDestino"><option value="">Armazém de destino...</option></select></div>
         <div id="resumoLoteOrigem" style="font-size:13px; margin:10px 0;"></div>
         <div class="linha-form"><input id="trQtdOrigem" type="number" min="0.001" step="0.001" placeholder="Quantidade retirada"><input id="trQtdDestino" type="number" min="0.001" step="0.001" placeholder="Quantidade obtida"><input id="trEquipamento" placeholder="Equipamento (quando exigido)"></div>
         <div class="linha-form"><label>Início <input id="trInicio" type="datetime-local"></label><label>Conclusão <input id="trFim" type="datetime-local"></label><input id="trObservacoes" placeholder="Observações/controlo"></div>
@@ -43,13 +43,14 @@
 </section>
 
 <section class="painel" data-secao="rastrear">
-    <div class="cartao"><h2>Transformações recentes</h2><table><thead><tr><th>Data</th><th>Origem</th><th>Operação</th><th>Destino</th><th>Quantidade</th><th>Validade</th></tr></thead><tbody id="corpoTransformacoes"></tbody></table></div>
+    <div class="cartao"><h2>Histórico e rastreabilidade</h2><p style="font-size:13px;color:var(--ink-suave)">Os lotes com saldo zero continuam aqui, mas deixam de aparecer nas listas de escolha.</p><div class="linha-form"><select id="histArtigo"><option value="">Todos os artigos</option></select><input id="histLote" placeholder="Filtrar por lote"><select id="histArmazem"><option value="">Todos os armazéns</option></select><button id="btnAplicarHistorico">Aplicar filtros</button></div><table><thead><tr><th>Data</th><th>Artigo</th><th>Lote</th><th>Armazém</th><th>Movimento/estado</th><th>Quantidade</th></tr></thead><tbody id="corpoHistoricoR3"></tbody></table></div>
+    <div class="cartao"><h2>Transformações fornecedor</h2><table><thead><tr><th>Data</th><th>Origem</th><th>Operação</th><th>Destino</th><th>Quantidade</th><th>Validade</th></tr></thead><tbody id="corpoTransformacoes"></tbody></table></div>
 </section>
 
 <section class="painel config-admin" data-secao="unidades" style="display:none;">
     <div class="cartao">
         <h2>Unidade base de stock do artigo</h2>
-        <p style="font-size:13px; color:var(--ink-suave);">Produto acabado: apenas UN ou PCK. Caixa e palete nunca são stock. Os artigos existentes ficam bloqueados para novos movimentos até esta configuração ser confirmada.</p>
+        <p style="font-size:13px; color:var(--ink-suave);">O PA por embalar é sempre UN. O PA comercial pode ser UN ou PCK. Caixa e palete são unidades logísticas físicas e não duplicam a quantidade canónica contida.</p>
         <div class="linha-form"><div class="campo-pesquisa-artigo"><input id="uaArtigoTexto" placeholder="Pesquisar artigo..." autocomplete="off"><input id="uaArtigo" type="hidden"><div id="uaArtigoResultados" class="lista-sugestoes" style="display:none;"></div></div><select id="uaUnidade"><option value="un">UN</option><option value="pack">PCK</option><option value="kg">KG</option><option value="l">L</option><option value="mil">MIL</option></select><input id="uaConteudo" type="number" min="0.001" step="0.001" placeholder="Unidades físicas por unidade stock"></div>
         <button id="btnConfirmarUnidade">Confirmar configuração</button><p id="erroUnidade" class="erro"></p><div id="estadoArtigo" style="font-size:13px;"></div>
     </div>
