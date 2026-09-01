@@ -24,6 +24,7 @@
     <button class="nav-item" data-secao="zonas"><i class="ti ti-map-pin" aria-hidden="true"></i> Stock &amp; Zonas</button>
     <button class="nav-item" data-secao="inventario"><i class="ti ti-clipboard-list" aria-hidden="true"></i> Inventário <span class="contador" id="contadorInventario" style="display:none;"></span></button>
     <button class="nav-item" data-secao="qualidade"><i class="ti ti-clipboard-check" aria-hidden="true"></i> Qualidade</button>
+    <a class="nav-item" href="modelo-artigos-lotes.html" style="text-decoration:none;"><i class="ti ti-arrows-transfer-up" aria-hidden="true"></i> Transformar lote</a>
 </nav>
 
 <div class="conteudo-admin">
@@ -178,16 +179,7 @@
         </div>
         <div class="linha-form">
             <select id="mUnidade">
-                <option value="un">Unidade</option>
-                <option value="kg">Kg</option>
-                <option value="l">Litro</option>
-                <option value="mil">Milheiro</option>
-                <option value="pack">Pack</option>
-                <option value="pack2">Pack 2</option>
-                <option value="pack4">Pack 4</option>
-                <option value="pack6">Pack 6</option>
-                <option value="caixa">Caixa</option>
-                <option value="palete">Palete</option>
+                <option value="">Escolhe primeiro o lote</option>
             </select>
             <input id="mQuantidade" type="number" min="0.01" step="0.01" placeholder="Quantidade">
         </div>
@@ -345,14 +337,14 @@ async function carregarLotesDoArtigo(artigoId, idSelect) {
     }
     const { data, error } = await supabaseClient
         .from("lotes_artigo")
-        .select("lote_artigo_id, numero_lote, quantidade_atual, artigos(unidade)")
+        .select("lote_artigo_id, numero_lote, quantidade_atual, localizacoes(nome), artigos(unidade_stock, configuracao_unidades_confirmada)")
         .eq("artigo_id", artigoId)
         .order("numero_lote");
     if (error) { console.error(error); return; }
 
     select.disabled = false;
     select.innerHTML = data.length
-        ? data.map((l) => `<option value="${l.lote_artigo_id}" data-unidade="${escaparHtml((l.artigos?.unidade || "un").toUpperCase())}">Lote ${escaparHtml(l.numero_lote)} (${l.quantidade_atual})</option>`).join("")
+        ? data.map((l) => `<option value="${l.lote_artigo_id}" data-unidade="${escaparHtml(l.artigos?.unidade_stock || "")}" data-confirmada="${l.artigos?.configuracao_unidades_confirmada ? "1" : "0"}">Lote ${escaparHtml(l.numero_lote)} (${l.quantidade_atual}) · ${escaparHtml(l.localizacoes?.nome ?? "sem armazém")}</option>`).join("")
         : `<option value="">Sem lotes deste artigo em stock</option>`;
     if (idSelect === "mLoteOrigem") actualizarRotuloUnidade();
 }
@@ -360,8 +352,13 @@ async function carregarLotesDoArtigo(artigoId, idSelect) {
 function actualizarRotuloUnidade() {
     const loteSelect = document.getElementById("mLoteOrigem");
     const opcaoEscolhida = loteSelect.options[loteSelect.selectedIndex];
-    const unidadeReal = opcaoEscolhida?.dataset.unidade || "UN";
-    document.getElementById("mUnidade").options[0].textContent = unidadeReal === "UN" ? "Unidade" : unidadeReal;
+    const unidadeReal = opcaoEscolhida?.dataset.unidade || "";
+    const confirmada = opcaoEscolhida?.dataset.confirmada === "1";
+    const selectUnidade = document.getElementById("mUnidade");
+    selectUnidade.innerHTML = confirmada
+        ? `<option value="${escaparHtml(unidadeReal)}">${unidadeReal === "pack" ? "PCK" : escaparHtml(unidadeReal.toUpperCase())}</option>`
+        : `<option value="">Unidade base por confirmar pelo Super Admin</option>`;
+    selectUnidade.disabled = !confirmada;
 }
 document.getElementById("mLoteOrigem").addEventListener("change", actualizarRotuloUnidade);
 
@@ -577,7 +574,7 @@ let ultimoStockPorZona = [];
 async function carregarStockPorZona() {
     const { data, error } = await supabaseClient
         .from("lotes_artigo")
-        .select("numero_lote, quantidade_atual, localizacao_id, artigos(designacao, unidade), localizacoes(nome)")
+        .select("numero_lote, quantidade_atual, localizacao_id, artigos(designacao, unidade_stock), localizacoes(nome)")
         .order("numero_lote");
     if (error) { console.error(error); return; }
     ultimoStockPorZona = data ?? [];
@@ -595,7 +592,7 @@ function renderizarStockPorZona() {
         tr.innerHTML = `
             <td data-rotulo="Artigo">${escaparHtml(l.artigos?.designacao ?? "—")}${l.localizacoes ? `<br><span style="font-size:12px; color:var(--ink-suave);">${escaparHtml(l.localizacoes.nome)}</span>` : ""}</td>
             <td data-rotulo="Lote" class="mono">${escaparHtml(l.numero_lote)}</td>
-            <td data-rotulo="Quantidade">${l.quantidade_atual} ${escaparHtml((l.artigos?.unidade ?? "un").toUpperCase())}</td>
+            <td data-rotulo="Quantidade">${l.quantidade_atual} ${escaparHtml(formatarUnidadeStock(l.artigos?.unidade_stock))}</td>
         `;
         corpo.appendChild(tr);
     });
@@ -615,7 +612,7 @@ document.getElementById("btnExportarStockZona").addEventListener("click", async 
     doc.autoTable({
         startY,
         head: [["Zona", "Artigo", "Lote", "Quantidade"]],
-        body: linhas.map((l) => [l.localizacoes?.nome ?? "—", l.artigos?.designacao ?? "—", l.numero_lote, `${l.quantidade_atual} ${(l.artigos?.unidade ?? "un").toUpperCase()}`]),
+        body: linhas.map((l) => [l.localizacoes?.nome ?? "—", l.artigos?.designacao ?? "—", l.numero_lote, `${l.quantidade_atual} ${formatarUnidadeStock(l.artigos?.unidade_stock)}`]),
         styles: { fontSize: 10, cellPadding: 3 },
         headStyles: ESTILO_CABECALHO_TABELA_PDF,
     });
@@ -711,7 +708,7 @@ async function abrirContagemInventario(inventarioId, nomeZona) {
 async function carregarItensInventario() {
     const { data, error } = await supabaseClient
         .from("inventario_itens")
-        .select("id, numero_lote, quantidade_esperada, quantidade_contada, contado, artigos(designacao, unidade)")
+        .select("id, numero_lote, quantidade_esperada, quantidade_contada, contado, artigos(designacao, unidade_stock)")
         .eq("inventario_id", inventarioActualId)
         .order("numero_lote");
     if (error) { console.error(error); return; }
@@ -727,7 +724,7 @@ function renderizarItensInventario() {
         tr.innerHTML = `
             <td data-rotulo="Artigo">${escaparHtml(item.artigos?.designacao ?? "—")}</td>
             <td data-rotulo="Lote" class="mono">${escaparHtml(item.numero_lote)}</td>
-            <td data-rotulo="Esperado">${item.quantidade_esperada} ${escaparHtml((item.artigos?.unidade ?? "un").toUpperCase())}</td>
+            <td data-rotulo="Esperado">${item.quantidade_esperada} ${escaparHtml(formatarUnidadeStock(item.artigos?.unidade_stock))}</td>
             <td data-rotulo="Contado"><input type="number" min="0" step="0.01" value="${item.quantidade_contada ?? ""}" placeholder="Escreve 0 se estiver mesmo vazio" data-id="${item.id}" style="width:120px;"></td>
         `;
         tr.querySelector("input").addEventListener("change", async (e) => {
@@ -777,7 +774,7 @@ document.getElementById("btnExportarPdfInventario").addEventListener("click", as
     doc.autoTable({
         startY,
         head: [["Artigo", "Lote", "Esperado", "Encontrado (preencher à mão)"]],
-        body: itensInventarioActual.map((i) => [i.artigos?.designacao ?? "—", i.numero_lote, `${i.quantidade_esperada} ${(i.artigos?.unidade ?? "un").toUpperCase()}`, ""]),
+        body: itensInventarioActual.map((i) => [i.artigos?.designacao ?? "—", i.numero_lote, `${i.quantidade_esperada} ${formatarUnidadeStock(i.artigos?.unidade_stock)}`, ""]),
         styles: { fontSize: 10, cellPadding: 4 },
         headStyles: ESTILO_CABECALHO_TABELA_PDF,
     });

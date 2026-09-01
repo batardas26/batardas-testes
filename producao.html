@@ -23,6 +23,7 @@
     <button class="nav-item" data-secao="pedidos"><i class="ti ti-clipboard-list" aria-hidden="true"></i> Pedidos ao armazém</button>
     <button class="nav-item" data-secao="movimentos"><i class="ti ti-arrows-exchange" aria-hidden="true"></i> Movimentos de stock</button>
     <button class="nav-item" data-secao="qualidade"><i class="ti ti-clipboard-check" aria-hidden="true"></i> Qualidade</button>
+    <a class="nav-item" href="modelo-artigos-lotes.html" style="text-decoration:none;"><i class="ti ti-arrows-transfer-up" aria-hidden="true"></i> Transformar lote</a>
 </nav>
 
 <div class="conteudo-admin">
@@ -120,16 +121,7 @@
         </div>
         <div class="linha-form">
             <select id="fUnidade">
-                <option value="un">Unidade</option>
-                <option value="kg">Kg</option>
-                <option value="l">Litro</option>
-                <option value="mil">Milheiro</option>
-                <option value="pack">Pack</option>
-                <option value="pack2">Pack 2</option>
-                <option value="pack4">Pack 4</option>
-                <option value="pack6">Pack 6</option>
-                <option value="caixa">Caixa</option>
-                <option value="palete">Palete</option>
+                <option value="">Escolhe primeiro o artigo</option>
             </select>
             <input id="fQuantidadePedido" type="number" min="1" placeholder="Quantidade">
         </div>
@@ -179,16 +171,7 @@
         </div>
         <div class="linha-form">
             <select id="mUnidade">
-                <option value="un">Unidade</option>
-                <option value="kg">Kg</option>
-                <option value="l">Litro</option>
-                <option value="mil">Milheiro</option>
-                <option value="pack">Pack</option>
-                <option value="pack2">Pack 2</option>
-                <option value="pack4">Pack 4</option>
-                <option value="pack6">Pack 6</option>
-                <option value="caixa">Caixa</option>
-                <option value="palete">Palete</option>
+                <option value="">Escolhe primeiro o lote</option>
             </select>
             <input id="mQuantidade" type="number" min="0.01" step="0.01" placeholder="Quantidade">
         </div>
@@ -282,14 +265,14 @@ async function carregarLotesDoArtigo(artigoId, idSelect) {
     }
     const { data, error } = await supabaseClient
         .from("lotes_artigo")
-        .select("lote_artigo_id, numero_lote, quantidade_atual, artigos(unidade)")
+        .select("lote_artigo_id, numero_lote, quantidade_atual, localizacoes(nome), artigos(unidade_stock, configuracao_unidades_confirmada)")
         .eq("artigo_id", artigoId)
         .order("numero_lote");
     if (error) { console.error(error); return; }
 
     select.disabled = false;
     select.innerHTML = data.length
-        ? data.map((l) => `<option value="${l.lote_artigo_id}" data-unidade="${escaparHtml((l.artigos?.unidade || "un").toUpperCase())}">Lote ${escaparHtml(l.numero_lote)} (${l.quantidade_atual})</option>`).join("")
+        ? data.map((l) => `<option value="${l.lote_artigo_id}" data-unidade="${escaparHtml(l.artigos?.unidade_stock || "")}" data-confirmada="${l.artigos?.configuracao_unidades_confirmada ? "1" : "0"}">Lote ${escaparHtml(l.numero_lote)} (${l.quantidade_atual}) · ${escaparHtml(l.localizacoes?.nome ?? "sem armazém")}</option>`).join("")
         : `<option value="">Sem lotes deste artigo em stock</option>`;
     if (idSelect === "mLoteOrigem") actualizarRotuloUnidade();
 }
@@ -297,8 +280,13 @@ async function carregarLotesDoArtigo(artigoId, idSelect) {
 function actualizarRotuloUnidade() {
     const loteSelect = document.getElementById("mLoteOrigem");
     const opcaoEscolhida = loteSelect.options[loteSelect.selectedIndex];
-    const unidadeReal = opcaoEscolhida?.dataset.unidade || "UN";
-    document.getElementById("mUnidade").options[0].textContent = unidadeReal === "UN" ? "Unidade" : unidadeReal;
+    const unidadeReal = opcaoEscolhida?.dataset.unidade || "";
+    const confirmada = opcaoEscolhida?.dataset.confirmada === "1";
+    const selectUnidade = document.getElementById("mUnidade");
+    selectUnidade.innerHTML = confirmada
+        ? `<option value="${escaparHtml(unidadeReal)}">${unidadeReal === "pack" ? "PCK" : escaparHtml(unidadeReal.toUpperCase())}</option>`
+        : `<option value="">Unidade base por confirmar pelo Super Admin</option>`;
+    selectUnidade.disabled = !confirmada;
 }
 document.getElementById("mLoteOrigem").addEventListener("change", actualizarRotuloUnidade);
 
@@ -395,15 +383,25 @@ async function carregarPedidos() {
 
 async function carregarLotesDisponiveisParaPedido(artigoId) {
     const select = document.getElementById("fLoteArtigo");
+    const selectUnidade = document.getElementById("fUnidade");
     if (!artigoId) {
         select.disabled = true;
         select.innerHTML = `<option value="">Qualquer lote (opcional)</option>`;
+        selectUnidade.disabled = true;
+        selectUnidade.innerHTML = `<option value="">Escolhe primeiro o artigo</option>`;
         return;
     }
+    const { data: artigo } = await supabaseClient.from("artigos")
+        .select("unidade_stock, configuracao_unidades_confirmada").eq("artigo_id", artigoId).single();
+    selectUnidade.disabled = !artigo?.configuracao_unidades_confirmada;
+    selectUnidade.innerHTML = artigo?.configuracao_unidades_confirmada
+        ? `<option value="${escaparHtml(artigo.unidade_stock)}">${escaparHtml(formatarUnidadeStock(artigo.unidade_stock))}</option>`
+        : `<option value="">Unidade base por confirmar</option>`;
     const { data, error } = await supabaseClient
         .from("lotes_artigo")
         .select("lote_artigo_id, numero_lote, quantidade_atual")
         .eq("artigo_id", artigoId)
+        .eq("estado_qualidade", "disponivel")
         .gt("quantidade_atual", 0)
         .order("criado_em", { ascending: true });
     if (error) { console.error(error); return; }
@@ -421,8 +419,8 @@ document.getElementById("btnPedir").addEventListener("click", async () => {
     const unidade = document.getElementById("fUnidade").value;
     const quantidade = Number(document.getElementById("fQuantidadePedido").value);
 
-    if (!artigoId || !quantidade) {
-        erroEl.textContent = "Escolhe o artigo e a quantidade.";
+    if (!artigoId || !unidade || !quantidade) {
+        erroEl.textContent = "Escolhe um artigo com unidade base confirmada e indica a quantidade.";
         return;
     }
 

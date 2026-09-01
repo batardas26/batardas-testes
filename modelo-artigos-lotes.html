@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TESTES — Artigos, Lotes e Validades — Batardas</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<link rel="icon" href="img/logo.png" type="image/png"><link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<aside class="ambiente-testes">BATARDAS · TESTES — BLOCO 1+2</aside>
+<div class="layout-admin">
+<nav class="barra-lateral">
+    <div class="marca"><img class="logo" src="img/logo.png" alt="Batardas"></div>
+    <button class="nav-item activo" data-secao="transformar"><i class="ti ti-arrows-transfer-up"></i> Transformar lote</button>
+    <button class="nav-item" data-secao="rastrear"><i class="ti ti-route"></i> Lotes derivados</button>
+    <button class="nav-item config-admin" data-secao="unidades" style="display:none;"><i class="ti ti-ruler-measure"></i> Unidades</button>
+    <button class="nav-item config-admin" data-secao="formatos" style="display:none;"><i class="ti ti-packages"></i> Formatos</button>
+    <button class="nav-item config-admin" data-secao="validades" style="display:none;"><i class="ti ti-calendar-time"></i> Validades</button>
+    <a class="nav-item" id="voltarModulo" href="index.html" style="text-decoration:none;"><i class="ti ti-arrow-left"></i> Voltar</a>
+</nav>
+<div class="conteudo-admin">
+<header><h1 id="tituloSecao">Transformar lote</h1><div><span class="utilizador" id="nomeUtilizador"></span><button class="secundario" onclick="terminarSessao()">Sair</button></div></header>
+<main>
+
+<section class="painel activo" data-secao="transformar">
+    <div class="cartao">
+        <h2>Classificar lote existente</h2>
+        <p style="font-size:13px; color:var(--ink-suave);">Passo único para lotes que já existiam antes deste módulo. Apenas completa apresentação/estado; não altera a quantidade.</p>
+        <div class="linha-form"><select id="clLote"><option value="">Lote...</option></select><input id="clApresentacao" placeholder="Apresentação (ex. inteira, 4.ª gama)"><select id="clEstado"><option value="fresco">Fresco</option><option value="refrigerado">Refrigerado</option><option value="congelado">Congelado</option><option value="descongelado">Descongelado</option><option value="ambiente">Ambiente</option></select><input id="clFornecedor" placeholder="Lote do fornecedor (se aplicável)"></div>
+        <button id="btnClassificarLote">Guardar classificação</button><p id="erroClassificar" class="erro"></p>
+    </div>
+    <div class="cartao">
+        <h2>Transformação rastreável</h2>
+        <p style="font-size:13px; color:var(--ink-suave);">Exemplo: cenoura fresca/refrigerada → cenoura congelada. A confirmação desconta apenas a quantidade escolhida do lote de origem e cria um lote interno derivado.</p>
+        <div class="linha-form"><select id="trLote"><option value="">Lote de origem...</option></select><select id="trRegra" disabled><option value="">Escolhe primeiro o lote</option></select><select id="trDestino"><option value="">Armazém de destino...</option></select></div>
+        <div id="resumoLoteOrigem" style="font-size:13px; margin:10px 0;"></div>
+        <div class="linha-form"><input id="trQtdOrigem" type="number" min="0.001" step="0.001" placeholder="Quantidade retirada"><input id="trQtdDestino" type="number" min="0.001" step="0.001" placeholder="Quantidade obtida"><input id="trEquipamento" placeholder="Equipamento (quando exigido)"></div>
+        <div class="linha-form"><label>Início <input id="trInicio" type="datetime-local"></label><label>Conclusão <input id="trFim" type="datetime-local"></label><input id="trObservacoes" placeholder="Observações/controlo"></div>
+        <button id="btnTransformar">Confirmar transformação</button><p id="erroTransformar" class="erro"></p>
+    </div>
+    <div class="cartao" id="resultadoTransformacao" style="display:none;"><h2>Novo lote interno</h2><div id="dadosNovoLote"></div></div>
+</section>
+
+<section class="painel" data-secao="rastrear">
+    <div class="cartao"><h2>Transformações recentes</h2><table><thead><tr><th>Data</th><th>Origem</th><th>Operação</th><th>Destino</th><th>Quantidade</th><th>Validade</th></tr></thead><tbody id="corpoTransformacoes"></tbody></table></div>
+</section>
+
+<section class="painel config-admin" data-secao="unidades" style="display:none;">
+    <div class="cartao">
+        <h2>Unidade base de stock do artigo</h2>
+        <p style="font-size:13px; color:var(--ink-suave);">Produto acabado: apenas UN ou PCK. Caixa e palete nunca são stock. Os artigos existentes ficam bloqueados para novos movimentos até esta configuração ser confirmada.</p>
+        <div class="linha-form"><div class="campo-pesquisa-artigo"><input id="uaArtigoTexto" placeholder="Pesquisar artigo..." autocomplete="off"><input id="uaArtigo" type="hidden"><div id="uaArtigoResultados" class="lista-sugestoes" style="display:none;"></div></div><select id="uaUnidade"><option value="un">UN</option><option value="pack">PCK</option><option value="kg">KG</option><option value="l">L</option><option value="mil">MIL</option></select><input id="uaConteudo" type="number" min="0.001" step="0.001" placeholder="Unidades físicas por unidade stock"></div>
+        <button id="btnConfirmarUnidade">Confirmar configuração</button><p id="erroUnidade" class="erro"></p><div id="estadoArtigo" style="font-size:13px;"></div>
+    </div>
+    <div class="cartao">
+        <h2>Conversão de apresentação</h2><p style="font-size:13px; color:var(--ink-suave);">Serve para encomendas e planeamento. Não autoriza movimentos de stock em caixa ou palete.</p>
+        <div class="linha-form"><div class="campo-pesquisa-artigo"><input id="cvArtigoTexto" placeholder="Pesquisar artigo..." autocomplete="off"><input id="cvArtigo" type="hidden"><div id="cvArtigoResultados" class="lista-sugestoes" style="display:none;"></div></div><select id="cvOrigem"><option value="un">UN</option><option value="pack">PCK</option><option value="caixa">Caixa</option><option value="palete">Palete</option><option value="kg">KG</option><option value="g">G</option><option value="l">L</option><option value="ml">ML</option><option value="mil">MIL</option></select><input id="cvFator" type="number" min="0.000001" step="0.000001" placeholder="Fator para unidade stock"><select id="cvUso"><option value="planeamento">Planeamento</option><option value="encomenda">Encomenda</option><option value="apresentacao">Apresentação</option></select></div>
+        <button id="btnGuardarConversaoNova">Guardar conversão</button><p id="erroConversaoNova" class="erro"></p><div id="listaConversoes"></div>
+    </div>
+</section>
+
+<section class="painel config-admin" data-secao="formatos" style="display:none;">
+    <div class="cartao"><h2>Criar formato logístico</h2><div class="linha-form"><input id="fmCodigo" placeholder="Código"><input id="fmNome" placeholder="Nome"><select id="fmTipo"><option value="caixa">Caixa</option><option value="palete">Palete</option></select><input id="fmRef" placeholder="Referência Primavera (opcional)"></div><div class="linha-form" id="linhaPalete" style="display:none;"><select id="fmCaixa"><option value="">Formato de caixa...</option></select><input id="fmQtdCaixas" type="number" min="1" step="1" placeholder="Caixas por palete"></div><button id="btnCriarFormato">Criar formato</button><p id="erroFormato" class="erro"></p></div>
+    <div class="cartao"><h2>Composição da caixa</h2><div class="linha-form"><select id="fiFormato"><option value="">Caixa...</option></select><div class="campo-pesquisa-artigo"><input id="fiArtigoTexto" placeholder="Artigo/embalagem..." autocomplete="off"><input id="fiArtigo" type="hidden"><div id="fiArtigoResultados" class="lista-sugestoes" style="display:none;"></div></div><input id="fiQuantidade" type="number" min="0.001" step="0.001" placeholder="Quantidade na unidade stock"><label><input id="fiMaterial" type="checkbox"> Material de embalagem</label></div><button id="btnAdicionarItemFormato">Adicionar componente</button><p id="erroItemFormato" class="erro"></p><div id="listaFormatos"></div></div>
+</section>
+
+<section class="painel config-admin" data-secao="validades" style="display:none;">
+    <div class="cartao"><h2>Família de validade</h2><div class="linha-form"><input id="fvCodigo" placeholder="Código"><input id="fvNome" placeholder="Nome"><input id="fvDescricao" placeholder="Descrição"><button id="btnCriarFamilia">Criar família</button></div><p id="erroFamilia" class="erro"></p></div>
+    <div class="cartao"><h2>Associar artigo a uma família</h2><div class="linha-form"><div class="campo-pesquisa-artigo"><input id="afArtigoTexto" placeholder="Pesquisar artigo..." autocomplete="off"><input id="afArtigo" type="hidden"><div id="afArtigoResultados" class="lista-sugestoes" style="display:none;"></div></div><select id="afFamilia"><option value="">Família...</option></select><button id="btnAssociarFamilia">Associar</button></div><p id="erroAssociarFamilia" class="erro"></p></div>
+    <div class="cartao">
+        <h2>Regra por artigo ou família</h2>
+        <div class="linha-form"><input id="rvCodigo" placeholder="Código"><input id="rvNome" placeholder="Nome"><select id="rvEscopo"><option value="artigo">Artigo específico</option><option value="familia">Família</option></select><div class="campo-pesquisa-artigo" id="rvArtigoBloco"><input id="rvArtigoTexto" placeholder="Artigo..." autocomplete="off"><input id="rvArtigo" type="hidden"><div id="rvArtigoResultados" class="lista-sugestoes" style="display:none;"></div></div><select id="rvFamilia" style="display:none;"><option value="">Família...</option></select></div>
+        <div class="linha-form"><input id="rvApresentacaoOrigem" placeholder="Apresentação origem (ex. inteira)"><select id="rvEstadoOrigem"><option value="fresco">Fresco</option><option value="refrigerado">Refrigerado</option><option value="congelado">Congelado</option><option value="descongelado">Descongelado</option><option value="ambiente">Ambiente</option></select><input id="rvOperacao" placeholder="Operação (ex. congelacao)"><input id="rvApresentacaoDestino" placeholder="Apresentação destino"><select id="rvEstadoDestino"><option value="congelado">Congelado</option><option value="refrigerado">Refrigerado</option><option value="fresco">Fresco</option><option value="descongelado">Descongelado</option><option value="ambiente">Ambiente</option></select></div>
+        <div class="linha-form"><input id="rvMin" type="number" min="0" step="1" placeholder="Prazo mínimo"><input id="rvMax" type="number" min="0" step="1" placeholder="Prazo máximo"><select id="rvUnidade"><option value="dias">Dias</option><option value="meses">Meses</option><option value="horas">Horas</option></select><input id="rvConservacao" placeholder="Condição de conservação"><label><input id="rvEquipamento" type="checkbox"> Exigir equipamento</label><label><input id="rvQualidade" type="checkbox"> Libertação pela Qualidade</label></div>
+        <button id="btnCriarRegra">Guardar regra</button><p id="erroRegra" class="erro"></p><div id="listaRegras"></div>
+    </div>
+</section>
+
+</main></div></div>
+<script src="js/supabaseClient.js"></script><script src="js/modelo-artigos-lotes.js"></script>
+</body></html>

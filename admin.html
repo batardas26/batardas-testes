@@ -30,6 +30,7 @@
     <button class="nav-item" data-secao="financeiro"><i class="ti ti-chart-line" aria-hidden="true"></i> Preços &amp; Custos</button>
     <button class="nav-item" data-secao="importar" id="navImportar" style="display:none;"><i class="ti ti-upload" aria-hidden="true"></i> Importações</button>
     <button class="nav-item" data-secao="qualidade"><i class="ti ti-clipboard-check" aria-hidden="true"></i> Qualidade</button>
+    <a class="nav-item" href="modelo-artigos-lotes.html" style="text-decoration:none;"><i class="ti ti-arrows-transfer-up" aria-hidden="true"></i> Artigos, lotes &amp; validades</a>
 
     <div class="rodape-lateral">
         <p style="font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-fraca); margin:12px 0 8px;">Ver como</p>
@@ -259,6 +260,12 @@
     </div>
 
     <div class="cartao">
+        <h2>Novo modelo de artigos, lotes e validades</h2>
+        <p style="font-size:13px; color:var(--ink-suave);">As conversões antigas de caixa/palete foram substituídas. Configura a unidade de stock, os formatos logísticos e as validades no novo configurador.</p>
+        <a href="modelo-artigos-lotes.html" class="botao" style="display:inline-block; text-decoration:none;">Abrir configurador</a>
+    </div>
+
+    <div class="cartao" style="display:none;" aria-hidden="true">
         <h2>Conversões de unidade (pack / caixa / palete)</h2>
         <p style="font-size:13px; color:var(--ink-suave); margin-top:-8px;">
             Introduz sempre em <strong>unidades base</strong>, já multiplicadas — se 1 caixa leva 12 packs de 6 unidades, escreve 72 em "Unidades por caixa", não 12.
@@ -1423,7 +1430,7 @@ async function carregarMovimentosStock() {
         .from("movimentos_stock")
         .select(`
             movimento_id, tipo, quantidade, unidade_movimentacao, estado, data_movimento, observacoes,
-            lotes_artigo!movimentos_stock_lote_artigo_id_fkey(numero_lote, artigos(designacao, unidade)),
+            lotes_artigo!movimentos_stock_lote_artigo_id_fkey(numero_lote, artigos(designacao, unidade_stock)),
             perfis!movimentos_stock_responsavel_fkey(nome)
         `)
         .order("data_movimento", { ascending: false })
@@ -1438,7 +1445,7 @@ async function carregarMovimentosStock() {
         // "un" no movimento significa "na unidade base do artigo" — mostra
         // essa unidade (kg, l, etc.) em vez de escrever sempre "un" à letra,
         // que confundia (ex. "167 un" de frango, quando é 167 kg).
-        const unidadeBaseArtigo = (m.lotes_artigo?.artigos?.unidade || "un").toUpperCase();
+        const unidadeBaseArtigo = formatarUnidadeStock(m.lotes_artigo?.artigos?.unidade_stock);
         const unidadeMostrada = m.unidade_movimentacao === "un" ? unidadeBaseArtigo : m.unidade_movimentacao;
         const ehPendente = m.estado === "Pendente";
         const acao = ehPendente
@@ -2121,7 +2128,7 @@ const NOME_TIPO_PRODUTO = { materia_prima: "Matéria-prima", intermedio: "Interm
 
 async function carregarListaArtigos() {
     const { data: artigos, error } = await supabaseClient
-        .from("artigos").select("artigo_id, ref_primavera, designacao, unidade, tipo_produto").order("designacao");
+        .from("artigos").select("artigo_id, ref_primavera, designacao, unidade, unidade_stock, configuracao_unidades_confirmada, tipo_produto").order("designacao");
     if (error) { console.error(error); return; }
 
     const { data: lotes } = await supabaseClient.from("lotes_artigo").select("artigo_id, quantidade_atual");
@@ -2150,7 +2157,7 @@ function renderizarListaArtigos() {
             <td data-rotulo="Referência" class="mono">${escaparHtml(a.ref_primavera)}</td>
             <td data-rotulo="Designação">${escaparHtml(a.designacao)}</td>
             <td data-rotulo="Tipo">${escaparHtml(NOME_TIPO_PRODUTO[a.tipo_produto] ?? "Matéria-prima")}</td>
-            <td data-rotulo="Unidade">${escaparHtml((a.unidade ?? "un").toUpperCase())}</td>
+            <td data-rotulo="Unidade">${escaparHtml(formatarUnidadeStock(a.unidade_stock))}${a.configuracao_unidades_confirmada ? "" : " · configurar"}</td>
             <td data-rotulo="Stock total">${a.stock.toFixed(2)}</td>
         `;
         tr.addEventListener("click", () => {
@@ -3010,7 +3017,7 @@ document.getElementById("btnExportarCustoProducao").addEventListener("click", as
 document.getElementById("btnExportarStockActual").addEventListener("click", async () => {
     const { data, error } = await supabaseClient
         .from("lotes_artigo")
-        .select("numero_lote, quantidade_atual, validade, artigos(ref_primavera, designacao, unidade), localizacoes(nome)")
+        .select("numero_lote, quantidade_atual, validade, artigos(ref_primavera, designacao, unidade_stock), localizacoes(nome)")
         .order("numero_lote");
     if (error) { toast("Erro ao exportar: " + error.message, "erro"); return; }
     if (!data.length) { toast("Sem stock a exportar.", "erro"); return; }
@@ -3018,7 +3025,7 @@ document.getElementById("btnExportarStockActual").addEventListener("click", asyn
     const linhas = [["Referência", "Designação", "Lote", "Quantidade", "Unidade", "Localização", "Validade"]];
     data.forEach((l) => linhas.push([
         l.artigos?.ref_primavera ?? "", l.artigos?.designacao ?? "", l.numero_lote, l.quantidade_atual,
-        (l.artigos?.unidade ?? "un").toUpperCase(), l.localizacoes?.nome ?? "", l.validade ?? "",
+        formatarUnidadeStock(l.artigos?.unidade_stock), l.localizacoes?.nome ?? "", l.validade ?? "",
     ]));
     const csv = linhas.map((linha) => linha.map(paraCsv).join(";")).join("\r\n");
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
@@ -3129,7 +3136,7 @@ async function abrirRevisaoInventario(inventarioId, nomeZona) {
 
     const { data } = await supabaseClient
         .from("inventario_itens")
-        .select("id, numero_lote, quantidade_esperada, quantidade_contada, lote_artigo_id, artigo_id, artigos(designacao, unidade)")
+        .select("id, numero_lote, quantidade_esperada, quantidade_contada, lote_artigo_id, artigo_id, artigos(designacao, unidade_stock)")
         .eq("inventario_id", inventarioId);
 
     const comDiferenca = (data ?? []).filter((i) => i.quantidade_contada !== null && Number(i.quantidade_contada) !== Number(i.quantidade_esperada));
