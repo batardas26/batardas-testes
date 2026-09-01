@@ -103,9 +103,9 @@
     </div>
 
     <div class="cartao">
-        <h2>Embaladas — prontas para carregar</h2>
+        <h2>Últimas encomendas carregadas pelo Armazém</h2>
         <table>
-            <thead><tr><th>Cliente</th><th>Entrega</th><th>Acção</th></tr></thead>
+            <thead><tr><th>Cliente</th><th>Entrega prevista</th><th>Carregada em</th></tr></thead>
             <tbody id="corpoProntas"></tbody>
         </table>
     </div>
@@ -615,7 +615,7 @@
         </div>
         <div class="linha-form">
             <input id="uEmailContacto" type="email" placeholder="Email de contacto (opcional — para alertas)">
-            <select id="uRole">
+            <select id="uRole" aria-label="Perfil base">
                 <option value="consulta">Consulta</option>
                 <option value="producao">Produção</option>
                 <option value="armazem">Armazém</option>
@@ -624,6 +624,17 @@
                 <option value="admin">Admin</option>
             </select>
         </div>
+        <p class="texto-suave"><strong>Perfil base</strong> decide que módulos a pessoa pode abrir. O nível operacional abaixo decide o que pode fazer em cada área. Assim podes criar, por exemplo, um perfil base Admin que seja apenas Operador no Armazém.</p>
+        <table class="tabela-permissoes-criacao-r31">
+            <thead><tr><th>Área</th><th>Nível operacional inicial</th></tr></thead>
+            <tbody>
+                <tr><td>Produção</td><td><select data-nova-area-r31="producao"><option value="sem_acesso">Sem acesso operacional</option><option value="consulta">Consulta</option><option value="operador">Operador</option><option value="responsavel">Responsável</option><option value="admin">Admin</option></select></td></tr>
+                <tr><td>Armazém</td><td><select data-nova-area-r31="armazem"><option value="sem_acesso">Sem acesso operacional</option><option value="consulta">Consulta</option><option value="operador">Operador</option><option value="responsavel">Responsável</option><option value="admin">Admin</option></select></td></tr>
+                <tr><td>Qualidade</td><td><select data-nova-area-r31="qualidade"><option value="sem_acesso">Sem acesso operacional</option><option value="consulta">Consulta</option><option value="operador">Operador</option><option value="responsavel">Responsável</option><option value="admin">Admin</option></select></td></tr>
+                <tr><td>Manutenção</td><td><select data-nova-area-r31="manutencao"><option value="sem_acesso">Sem acesso operacional</option><option value="consulta">Consulta</option><option value="operador">Operador</option><option value="responsavel">Responsável</option><option value="admin">Admin</option></select></td></tr>
+                <tr><td>Administração</td><td><select data-nova-area-r31="administracao"><option value="sem_acesso">Sem acesso operacional</option><option value="consulta">Consulta</option><option value="operador">Operador</option><option value="responsavel">Responsável</option><option value="admin">Admin</option></select></td></tr>
+            </tbody>
+        </table>
         <button id="btnCriarUtilizador">Criar utilizador</button>
         <p id="erroUtilizador" class="erro"></p>
     </div>
@@ -1592,25 +1603,21 @@ async function marcarMovimentoRegistado(movimentoId) {
 async function carregar() {
     const { data: prontas, error: erro1 } = await supabaseClient
         .from("encomendas")
-        .select("encomenda_id, data_entrega_pretendida, clientes(nome)")
-        .eq("estado", "Embalada")
-        .order("data_entrega_pretendida", { ascending: true });
+        .select("encomenda_id, data_entrega_pretendida, data_hora_carregamento, clientes(nome)")
+        .eq("estado", "Carregada")
+        .order("data_hora_carregamento", { ascending: false })
+        .limit(10);
 
     const corpoProntas = document.getElementById("corpoProntas");
     if (erro1) { console.error(erro1); return; }
     corpoProntas.innerHTML = prontas.length ? "" :
-        `<tr><td colspan="3" style="text-align:center; color:var(--ink-suave);">Nada embalado à espera de carregamento.</td></tr>`;
-    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+        `<tr><td colspan="3" style="text-align:center; color:var(--ink-suave);">Ainda não existem carregamentos confirmados pelo Armazém.</td></tr>`;
     prontas.forEach((enc) => {
-        const dataEntrega = new Date(enc.data_entrega_pretendida + "T00:00:00");
-        const atrasada = dataEntrega <= hoje;
-        const corData = atrasada ? "var(--perigo)" : "inherit";
-        const rotulo = atrasada ? " — atrasada" : "";
         const tr = document.createElement("tr");
         tr.innerHTML = `
             <td data-rotulo="Cliente">${escaparHtml(enc.clientes?.nome ?? "—")}</td>
-            <td data-rotulo="Entrega"><span style="color:${corData}; font-weight:${atrasada ? 600 : 400};">${formatarData(enc.data_entrega_pretendida)}${rotulo}</span></td>
-            <td data-rotulo="Acção"><button onclick="marcarCarregada('${enc.encomenda_id}')">Marcar carregada</button></td>
+            <td data-rotulo="Entrega prevista">${formatarData(enc.data_entrega_pretendida)}</td>
+            <td data-rotulo="Carregada em">${enc.data_hora_carregamento ? new Date(enc.data_hora_carregamento).toLocaleString("pt-PT") : "—"}</td>
         `;
         corpoProntas.appendChild(tr);
     });
@@ -1631,7 +1638,7 @@ async function carregar() {
         tr.innerHTML = `
             <td data-rotulo="Cliente">${escaparHtml(enc.clientes?.nome ?? "—")}</td>
             <td data-rotulo="Entrega">${formatarData(enc.data_entrega_pretendida)}</td>
-            <td data-rotulo="Estado"><span class="badge ${classeEstado}">${enc.estado}</span></td>
+            <td data-rotulo="Estado"><span class="badge ${classeEstado}">${escaparHtml(formatarEstadoEncomenda(enc.estado))}</span></td>
             <td data-rotulo="">${podeCancelar ? `<button class="secundario" style="padding:4px 10px; font-size:12px;">Cancelar</button>` : ""}</td>
         `;
         const botaoCancelar = tr.querySelector("button");
@@ -1663,21 +1670,6 @@ async function cancelarEncomenda(encomendaId) {
 
     toast("Encomenda cancelada.", "sucesso");
     carregar();
-}
-
-async function marcarCarregada(encomendaId) {
-    const { data: { session } } = await supabaseClient.auth.getSession();
-    const { error } = await supabaseClient
-        .from("encomendas")
-        .update({
-            estado: "Carregada",
-            data_hora_carregamento: new Date().toISOString(),
-            carregado_por: session.user.id,
-        })
-        .eq("encomenda_id", encomendaId);
-    if (error) { toast("Erro ao actualizar: " + error.message, "erro"); return; }
-    carregar();
-    toast("Encomenda marcada como carregada.", "sucesso");
 }
 
 document.getElementById("btnRegistar").addEventListener("click", async () => {
@@ -1748,9 +1740,9 @@ document.getElementById("btnRegistar").addEventListener("click", async () => {
 const RESPONSAVEL_POR_ESTADO = {
     "Registada": "Por planear",
     "Em Produção": "Produção",
-    "Em Preparação": "Armazém — Preparação",
-    "Pronta": "Armazém — Embalamento",
-    "Embalada": "Admin — Carregamento",
+    "Em Preparação": "Armazém — Embalamento",
+    "Pronta": "Armazém — Picking",
+    "Embalada": "Admin — Carregamento (legado)",
     "Carregada": "Concluída",
 };
 
@@ -2102,17 +2094,23 @@ document.getElementById("btnCriarUtilizador").addEventListener("click", async ()
     const nomeUtilizador = document.getElementById("uNomeUtilizador").value.trim();
     const emailContacto = document.getElementById("uEmailContacto").value.trim();
     const role = document.getElementById("uRole").value;
+    const permissoesOperacionais = [...document.querySelectorAll("[data-nova-area-r31]")]
+        .filter((campo) => campo.value !== "sem_acesso")
+        .map((campo) => ({ area: campo.dataset.novaAreaR31, nivel: campo.value }));
 
     if (!nome || !nomeUtilizador) { erroEl.textContent = "Preenche nome e nome de utilizador."; return; }
 
-    const resultado = await chamarGestaoUtilizadores({ acao: "criar_utilizador", nome, nomeUtilizador, emailContacto, role });
+    const resultado = await chamarGestaoUtilizadores({ acao: "criar_utilizador", nome, nomeUtilizador, emailContacto, role, permissoesOperacionais });
     if (resultado.error) { erroEl.textContent = "Erro: " + resultado.error; return; }
 
     mostrarModalPassword(`Conta criada — utilizador "${resultado.nomeUtilizador}" — password inicial`, resultado.password);
     document.getElementById("uNome").value = "";
     document.getElementById("uNomeUtilizador").value = "";
     document.getElementById("uEmailContacto").value = "";
+    document.getElementById("uRole").value = "consulta";
+    document.querySelectorAll("[data-nova-area-r31]").forEach((campo) => campo.value = "sem_acesso");
     carregarUtilizadores();
+    carregarUtilizadoresPermissoesR31();
 });
 
 // --- Custos unitários e BOM -----------------------------------------------

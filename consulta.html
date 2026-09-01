@@ -426,7 +426,7 @@ function desenharTabela() {
         tr.innerHTML = `
             <td data-rotulo="Cliente">${escaparHtml(enc.clientes?.nome ?? "—")}</td>
             <td data-rotulo="Entrega"><span style="color:${atrasada ? "var(--perigo)" : "inherit"}; font-weight:${atrasada ? 600 : 400};">${formatarData(enc.data_entrega_pretendida)}${atrasada ? " — atrasada" : ""}</span></td>
-            <td data-rotulo="Estado"><span class="badge ${classeEstado}">${enc.estado}</span></td>
+            <td data-rotulo="Estado"><span class="badge ${classeEstado}">${escaparHtml(formatarEstadoEncomenda(enc.estado))}</span></td>
         `;
         corpo.appendChild(tr);
     });
@@ -447,7 +447,7 @@ async function carregarKpis() {
     Object.entries(contagemEstados).forEach(([estado, n]) => {
         const classeEstado = CLASSE_ESTADO[estado] ?? "Registada";
         const div = document.createElement("div");
-        div.innerHTML = `<span class="badge ${classeEstado}">${estado}</span> <strong style="margin-left:6px;">${n}</strong>`;
+        div.innerHTML = `<span class="badge ${classeEstado}">${escaparHtml(formatarEstadoEncomenda(estado))}</span> <strong style="margin-left:6px;">${n}</strong>`;
         blocoFunil.appendChild(div);
     });
 

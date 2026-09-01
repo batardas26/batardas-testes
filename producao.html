@@ -46,9 +46,9 @@
         <button data-estado="todos" class="filtro-activo">Todas</button>
         <button data-estado="Registada">Registadas</button>
         <button data-estado="Em Produção">Em Produção</button>
-        <button data-estado="Em Preparação">Em Preparação</button>
+        <button data-estado="Em Preparação">Por embalar</button>
         <button data-estado="Pronta">Prontas</button>
-        <button data-estado="Embalada">Embaladas</button>
+        <button data-estado="Embalada">Picking concluído</button>
         <button data-estado="Carregada">Carregadas</button>
     </div>
 
@@ -502,7 +502,7 @@ async function carregar() {
         tr.innerHTML = `
             <td data-rotulo="Cliente">${escaparHtml(enc.clientes?.nome ?? "—")}<div style="font-size:13px; color:var(--ink-suave); margin-top:4px;">${produtos || "—"}</div>${materiais}</td>
             <td data-rotulo="Entrega">${formatarData(enc.data_entrega_pretendida)}</td>
-            <td data-rotulo="Estado"><span class="badge ${classeEstado}">${enc.estado}</span></td>
+            <td data-rotulo="Estado"><span class="badge ${classeEstado}">${escaparHtml(formatarEstadoEncomenda(enc.estado))}</span></td>
             <td data-rotulo="Acção">${acao}</td>
         `;
         corpo.appendChild(tr);
@@ -536,11 +536,15 @@ async function marcarProduzida(encomendaId) {
             estado: "Em Preparação",
             data_conclusao_producao: new Date().toISOString(),
             concluido_producao_por: session.user.id,
+            data_conclusao_preparacao: null,
+            preparado_por: null,
+            data_conclusao_embalamento: null,
+            embalado_por: null,
         })
         .eq("encomenda_id", encomendaId);
     if (error) { toast("Erro ao actualizar: " + error.message, "erro"); return; }
     carregar();
-    toast("Produção marcada como concluída — passou para preparação.", "sucesso");
+    toast("Produção concluída — a encomenda passou diretamente para Por embalar.", "sucesso");
 }
 
 document.querySelectorAll(".filtros button").forEach((btn) => {

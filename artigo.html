@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="css/style.css"><link rel="icon" href="img/logo.png" type="image/png">
 </head>
 <body>
-<aside class="ambiente-testes">BATARDAS · TESTES — R3.1</aside>
+<aside class="ambiente-testes">BATARDAS · TESTES — R3.1.1</aside>
 <header><div><button class="secundario" onclick="history.length>1?history.back():location.href='inicio.html'">Voltar</button><h1 style="margin:0">Ficha do artigo</h1></div><div><span class="utilizador" id="nomeUtilizador"></span><button class="secundario" onclick="terminarSessao()">Sair</button></div></header>
 <main>
   <section class="cartao artigo-cabecalho-r31"><div><p class="mono" id="artigoRef">—</p><h2 id="artigoNome">A carregar…</h2><p id="artigoMeta" class="texto-suave"></p></div><a class="secundario" href="modelo-artigos-lotes.html">Configurar artigo</a></section>
@@ -22,7 +22,7 @@
 <script>
 let linhasStockR31=[];
 async function iniciarFicha(){
- const session=await exigirSessao();if(!session)return;const perfil=await obterPerfil(session.user.id);if(!perfil)return;await renderizarCabecalhoUtilizador(perfil,session.user.id);
+ const session=await exigirSessao();if(!session)return;const perfil=await obterPerfil(session.user.id);if(!perfil)return;const rotaPendente=rotaPendentePrimeiroAcesso(perfil);if(rotaPendente){location.href=rotaPendente;return;}await renderizarCabecalhoUtilizador(perfil,session.user.id);
  const id=new URLSearchParams(location.search).get("id");if(!id){document.getElementById("artigoNome").textContent="Artigo não indicado";return;}
  const [{data:a,error},{data:stock}]=await Promise.all([supabaseClient.from("artigos").select("artigo_id,ref_primavera,designacao,tipo_produto,unidade_stock,controla_lote_fornecedor,stock_minimo,stock_alvo").eq("artigo_id",id).single(),supabaseClient.from("stock_artigo_r31").select("*").eq("artigo_id",id)]);
  if(error){document.getElementById("artigoNome").textContent=traduzirErro(error.message);return;}

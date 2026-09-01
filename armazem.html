@@ -74,6 +74,15 @@
             <tbody id="corpoHistorico"></tbody>
         </table>
     </div>
+
+    <div class="cartao">
+        <h2>Prontas para carregar</h2>
+        <p class="texto-suave">Só aparecem depois do embalamento e do picking. Confirmar a carga regista a saída operacional para Admin e Consulta; não imprime etiquetas nem cria um movimento de stock adicional.</p>
+        <table>
+            <thead><tr><th>Cliente</th><th>Entrega</th><th>Acção</th></tr></thead>
+            <tbody id="corpoProntasCarregar"></tbody>
+        </table>
+    </div>
 </section>
 
 <section class="painel" data-secao="embalamento">
@@ -526,7 +535,8 @@ async function carregar() {
     const { data: paraPreparar, error: erro1 } = await supabaseClient
         .from("encomendas")
         .select("encomenda_id, data_entrega_pretendida, clientes(nome), encomenda_lote(quantidade_alocada, lotes_comerciais(numero_lote, artigos(designacao)))")
-        .eq("estado", "Em Preparação")
+        .eq("estado", "Pronta")
+        .is("data_conclusao_preparacao", null)
         .order("data_entrega_pretendida", { ascending: true });
 
     const corpoPrep = document.getElementById("corpoPreparacao");
@@ -563,9 +573,29 @@ async function carregar() {
         const tr = document.createElement("tr");
         tr.innerHTML = `
             <td data-rotulo="Cliente">${escaparHtml(enc.clientes?.nome ?? "—")}</td>
-            <td data-rotulo="Estado"><span class="badge ${classeEstado}">${enc.estado}</span></td>
+            <td data-rotulo="Estado"><span class="badge ${classeEstado}">${escaparHtml(formatarEstadoEncomenda(enc.estado))}</span></td>
         `;
         corpoHist.appendChild(tr);
+    });
+
+    const { data: prontasCarregar, error: erro3 } = await supabaseClient
+        .from("encomendas")
+        .select("encomenda_id, data_entrega_pretendida, clientes(nome)")
+        .in("estado", ["Pronta", "Embalada"])
+        .not("data_conclusao_preparacao", "is", null)
+        .order("data_entrega_pretendida", { ascending: true });
+    const corpoCarga = document.getElementById("corpoProntasCarregar");
+    if (erro3) { console.error(erro3); return; }
+    corpoCarga.innerHTML = prontasCarregar.length ? "" :
+        `<tr><td colspan="3" style="text-align:center; color:var(--ink-suave);">Nada pronto para carregar.</td></tr>`;
+    prontasCarregar.forEach((enc) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td data-rotulo="Cliente">${escaparHtml(enc.clientes?.nome ?? "—")}</td>
+            <td data-rotulo="Entrega">${formatarData(enc.data_entrega_pretendida)}</td>
+            <td data-rotulo="Acção"><button onclick="marcarCarregadaArmazem('${enc.encomenda_id}')">Confirmar carregamento</button></td>
+        `;
+        corpoCarga.appendChild(tr);
     });
 }
 
@@ -574,14 +604,32 @@ async function marcarPronta(encomendaId) {
     const { error } = await supabaseClient
         .from("encomendas")
         .update({
-            estado: "Pronta",
             data_conclusao_preparacao: new Date().toISOString(),
             preparado_por: session.user.id,
         })
         .eq("encomenda_id", encomendaId);
     if (error) { toast("Erro ao actualizar: " + error.message, "erro"); return; }
     carregar();
-    toast("Picking concluído — passa para embalamento.", "sucesso");
+    toast("Picking concluído — a encomenda está pronta para carregar.", "sucesso");
+}
+
+async function marcarCarregadaArmazem(encomendaId) {
+    if (!confirm("Confirmas que esta encomenda foi fisicamente carregada?")) return;
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const { error } = await supabaseClient
+        .from("encomendas")
+        .update({
+            estado: "Carregada",
+            data_hora_carregamento: new Date().toISOString(),
+            carregado_por: session.user.id,
+        })
+        .eq("encomenda_id", encomendaId)
+        .in("estado", ["Pronta", "Embalada"])
+        .not("data_conclusao_preparacao", "is", null);
+    if (error) { toast("Erro ao confirmar carregamento: " + traduzirErro(error.message), "erro"); return; }
+    await carregar();
+    carregarEncomendasR31();
+    toast("Carregamento confirmado — Admin e Consulta já podem incluí-lo nas vendas despachadas.", "sucesso");
 }
 
 let encomendasR31=[];let filtroEncomendasR31="Todas";
@@ -589,10 +637,10 @@ async function carregarEncomendasR31(){
  const [{data,error},{data:rotas,error:erroRotas}]=await Promise.all([supabaseClient.from("encomendas").select("encomenda_id,data_entrega_pretendida,estado,clientes(nome)").order("data_entrega_pretendida"),supabaseClient.from("rotas_encomenda_r31").select("encomenda_id,rota,detalhe")]);
  if(erroRotas){document.getElementById("corpoEncomendasR31").innerHTML=`<tr><td colspan="4" class="erro">${escaparHtml(traduzirErro(erroRotas.message))}</td></tr>`;return;}
  if(error){document.getElementById("corpoEncomendasR31").innerHTML=`<tr><td colspan="4" class="erro">${escaparHtml(traduzirErro(error.message))}</td></tr>`;return;}
- const mapa=Object.fromEntries((rotas||[]).map(r=>[r.encomenda_id,r]));encomendasR31=(data||[]).map(e=>({...e,rotaR31:mapa[e.encomenda_id]}));const estados=["Todas",...new Set(encomendasR31.map(e=>e.estado))];document.getElementById("filtrosEncomendasR31").innerHTML=estados.map(e=>`<button class="secundario ${e===filtroEncomendasR31?"activo":""}" data-estado-r31="${escaparHtml(e)}">${escaparHtml(e)}</button>`).join("");document.querySelectorAll("[data-estado-r31]").forEach(b=>b.onclick=()=>{filtroEncomendasR31=b.dataset.estadoR31;renderizarEncomendasR31();});renderizarEncomendasR31();
+ const mapa=Object.fromEntries((rotas||[]).map(r=>[r.encomenda_id,r]));encomendasR31=(data||[]).map(e=>({...e,rotaR31:mapa[e.encomenda_id]}));const estados=["Todas",...new Set(encomendasR31.map(e=>e.estado))];document.getElementById("filtrosEncomendasR31").innerHTML=estados.map(e=>`<button class="secundario ${e===filtroEncomendasR31?"activo":""}" data-estado-r31="${escaparHtml(e)}">${escaparHtml(e==="Todas"?e:formatarEstadoEncomenda(e))}</button>`).join("");document.querySelectorAll("[data-estado-r31]").forEach(b=>b.onclick=()=>{filtroEncomendasR31=b.dataset.estadoR31;renderizarEncomendasR31();});renderizarEncomendasR31();
 }
 function renderizarEncomendasR31(){
- const lista=filtroEncomendasR31==="Todas"?encomendasR31:encomendasR31.filter(e=>e.estado===filtroEncomendasR31);document.getElementById("corpoEncomendasR31").innerHTML=lista.map(e=>{const rota=e.rotaR31?.rota||"por analisar";return `<tr><td>${escaparHtml(e.clientes?.nome||"—")}</td><td>${formatarData(e.data_entrega_pretendida)}</td><td><span class="badge ${CLASSE_ESTADO[e.estado]||""}">${escaparHtml(e.estado)}</span></td><td><strong>${escaparHtml(rota)}</strong></td></tr>`;}).join("")||'<tr><td colspan="4" class="texto-suave">Sem encomendas neste estado.</td></tr>';
+ const lista=filtroEncomendasR31==="Todas"?encomendasR31:encomendasR31.filter(e=>e.estado===filtroEncomendasR31);document.getElementById("corpoEncomendasR31").innerHTML=lista.map(e=>{const rota=e.rotaR31?.rota||"por analisar";return `<tr><td>${escaparHtml(e.clientes?.nome||"—")}</td><td>${formatarData(e.data_entrega_pretendida)}</td><td><span class="badge ${CLASSE_ESTADO[e.estado]||""}">${escaparHtml(formatarEstadoEncomenda(e.estado))}</span></td><td><strong>${escaparHtml(rota)}</strong></td></tr>`;}).join("")||'<tr><td colspan="4" class="texto-suave">Sem encomendas neste estado.</td></tr>';
 }
 
 const TITULOS_SECAO = { encomendas:"Encomendas", picking: "Picking", embalamento: "Embalamento", pedidos: "Pedidos de armazém", movimentos: "Movimentos de stock", zonas: "Stock & Zonas", r3: "Fluxo interno R3", inventario: "Inventário", qualidade: "Qualidade" };
@@ -1021,7 +1069,7 @@ async function carregarPorEmbalar() {
     const { data, error } = await supabaseClient
         .from("encomendas")
         .select("encomenda_id, data_entrega_pretendida, clientes(nome)")
-        .eq("estado", "Pronta")
+        .eq("estado", "Em Preparação")
         .order("data_entrega_pretendida", { ascending: true });
     if (error) { console.error(error); return; }
 
@@ -1154,14 +1202,20 @@ document.getElementById("btnConcluirEmbalamento").addEventListener("click", asyn
 
     const { data: { session } } = await supabaseClient.auth.getSession();
     const { error: erroEstado } = await supabaseClient.from("encomendas").update({
-        estado: "Embalada", data_conclusao_embalamento: new Date().toISOString(), embalado_por: session.user.id,
+        estado: "Pronta",
+        data_conclusao_embalamento: new Date().toISOString(),
+        embalado_por: session.user.id,
+        data_conclusao_preparacao: null,
+        preparado_por: null,
     }).eq("encomenda_id", encomendaEmbalarId);
     if (erroEstado) { erroEl.textContent = traduzirErro(erroEstado.message); return; }
 
-    toast("Embalamento concluído — pronto para carregar.", "sucesso");
+    toast("Embalamento concluído — encomenda Pronta para picking e impressão de etiquetas.", "sucesso");
     document.getElementById("cartaoEmbalarEncomenda").style.display = "none";
     encomendaEmbalarId = null;
-    carregarPorEmbalar();
+    await carregarPorEmbalar();
+    await carregar();
+    carregarEncomendasR31();
     carregarLotesDoArtigo(null, "mLoteOrigem");
 });
 

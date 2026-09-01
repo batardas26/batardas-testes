@@ -69,8 +69,9 @@ async function tentarLogin() {
         return;
     }
 
-    if (!perfil.perfil_completo) {
-        window.location.href = "completar-perfil.html";
+    const rotaPendente = rotaPendentePrimeiroAcesso(perfil);
+    if (rotaPendente) {
+        window.location.href = rotaPendente;
         return;
     }
     window.location.href = "inicio.html";
@@ -102,7 +103,8 @@ if (utilizadorLembrado) {
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (session) {
         const perfil = await obterPerfil(session.user.id);
-        if (perfil && !perfil.perfil_completo) { window.location.href = "completar-perfil.html"; return; }
+        const rotaPendente = rotaPendentePrimeiroAcesso(perfil);
+        if (rotaPendente) { window.location.href = rotaPendente; return; }
         if (perfil) window.location.href = "inicio.html";
     }
 })();

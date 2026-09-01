@@ -8,15 +8,15 @@
 <link rel="icon" href="img/logo.png" type="image/png"><link rel="stylesheet" href="css/style.css">
 </head>
 <body class="pagina-inicio">
-<aside class="ambiente-testes">BATARDAS · TESTES — R3.1</aside>
+<aside class="ambiente-testes">BATARDAS · TESTES — R3.1.1</aside>
 <header class="inicio-topo">
-    <div class="inicio-marca"><img src="img/logo.png" alt="Batardas"><div><strong>Centro operacional</strong><small>Início e fecho de turno</small></div></div>
+    <div class="inicio-marca"><img src="img/logo.png" alt="Batardas"><strong>Centro operacional</strong></div>
     <div><span class="utilizador" id="nomeUtilizador"></span><button class="secundario" onclick="terminarSessao()">Sair</button></div>
 </header>
 <main class="inicio-conteudo">
     <section class="inicio-boas-vindas">
         <div><p class="inicio-data" id="dataHoje"></p><h1 id="saudacao">Bom trabalho.</h1><p>Regista o plano no início, as exceções quando acontecem e confirma os valores reais no fim do turno.</p></div>
-        <span class="badge-r3">R3.1 · TESTES</span>
+        <span class="badge-r3">R3.1.1 · TESTES</span>
     </section>
 
     <section class="inicio-grelha-resumo" aria-label="Resumo operacional">
@@ -56,7 +56,8 @@ const MODULOS = [
 async function iniciarHomepage() {
     const session = await exigirSessao(); if (!session) return;
     const perfil = await obterPerfil(session.user.id); if (!perfil) return;
-    if (!perfil.perfil_completo) { location.href="completar-perfil.html"; return; }
+    const rotaPendente = rotaPendentePrimeiroAcesso(perfil);
+    if (rotaPendente) { location.href=rotaPendente; return; }
     await renderizarCabecalhoUtilizador(perfil, session.user.id);
     await instalarPedidoRapidoManutencao(perfil);
     renderizarModulos(perfil);
@@ -101,6 +102,7 @@ async function carregarKpis(session) {
 
 const AREA_DO_ROLE={producao:"producao",armazem:"armazem",qualidade:"qualidade",manutencao:"manutencao"};
 let diaAtualR31=null;
+let diaVisivelR31=null;
 async function carregarDiaOperacional(perfil,userId) {
     const areasResponsavel=(perfil.acessosArea||[]).filter(a=>a.nivel==="responsavel"&&AREA_DO_ROLE[a.area]).map(a=>a.area);
     const controlo=document.getElementById("controloDiaR31");
@@ -120,10 +122,22 @@ async function carregarDiaOperacional(perfil,userId) {
 
 async function lerDiaAberto(){
     const area=document.getElementById("areaDiaR31")?.value; if(!area)return;
-    const {data}=await supabaseClient.from("dias_operacionais_r31").select("id,estado,data_operacional,aberto_em,nota_continuidade").eq("area",area).eq("estado","aberto").maybeSingle();
-    diaAtualR31=data||null;
-    document.getElementById("estadoDiaR31").textContent=data?`Aberto em ${formatarData(data.data_operacional)}`:"Sem dia aberto";
-    if(data) await supabaseClient.rpc("sincronizar_checklist_dia_r31",{p_dia:data.id});
+    const {data:aberto,error}=await supabaseClient.from("dias_operacionais_r31").select("id,estado,data_operacional,aberto_em,fechado_em,nota_continuidade").eq("area",area).eq("estado","aberto").maybeSingle();
+    if(error){toast(traduzirErro(error.message),"erro");return;}
+    let visivel=aberto||null;
+    if(!visivel){
+        const {data:ultimo}=await supabaseClient.from("dias_operacionais_r31").select("id,estado,data_operacional,aberto_em,fechado_em,nota_continuidade").eq("area",area).eq("estado","fechado").order("fechado_em",{ascending:false}).limit(1).maybeSingle();
+        visivel=ultimo||null;
+    }
+    diaAtualR31=aberto||null;
+    diaVisivelR31=visivel;
+    const estado=document.getElementById("estadoDiaR31"),nota=document.getElementById("notaContinuidadeR31");
+    if(aberto) estado.textContent=`Aberto em ${formatarData(aberto.data_operacional)}`;
+    else if(visivel) estado.textContent=`Último fecho: ${formatarData(visivel.data_operacional)}${visivel.fechado_em?` · ${new Date(visivel.fechado_em).toLocaleTimeString("pt-PT",{hour:"2-digit",minute:"2-digit"})}`:""}`;
+    else estado.textContent="Sem dia registado";
+    nota.value=visivel?.nota_continuidade||"";
+    nota.disabled=!aberto;
+    if(aberto) await supabaseClient.rpc("sincronizar_checklist_dia_r31",{p_dia:aberto.id});
     await lerTarefas();
 }
 async function abrirDia(){
@@ -137,9 +151,10 @@ async function fecharDia(){
     if(error){toast(traduzirErro(error.message),"erro");return;} toast("Dia operacional fechado.","sucesso"); await lerDiaAberto();
 }
 async function lerTarefas(){
-    if(!diaAtualR31){renderizarTarefas([],true);return;}
-    const {data,error}=await supabaseClient.from("tarefas_dia_r31").select("id,titulo,origem,concluida,obrigatoria_fecho,observacoes").eq("dia_id",diaAtualR31.id).order("criada_em");
-    if(error){document.getElementById("checklistDiaR31").innerHTML=`<p class="erro">${escaparHtml(traduzirErro(error.message))}</p>`;return;} renderizarTarefas(data||[],true);
+    const dia=diaAtualR31||diaVisivelR31;
+    if(!dia){renderizarTarefas([],false);return;}
+    const {data,error}=await supabaseClient.from("tarefas_dia_r31").select("id,titulo,origem,concluida,obrigatoria_fecho,observacoes").eq("dia_id",dia.id).order("criada_em");
+    if(error){document.getElementById("checklistDiaR31").innerHTML=`<p class="erro">${escaparHtml(traduzirErro(error.message))}</p>`;return;} renderizarTarefas(data||[],Boolean(diaAtualR31));
 }
 function renderizarTarefas(tarefas,podeGerir){
     document.getElementById("checklistDiaR31").innerHTML=tarefas.length?tarefas.map(t=>`<label class="check-turno"><input type="checkbox" data-tarefa="${t.id}" ${t.concluida?"checked":""} ${podeGerir?"":"disabled"}><span>${escaparHtml(t.titulo)}<small>${t.origem==="automatica"?"Gerada por atividade real":t.origem==="atribuida"?"Atribuída pelo responsável":"Rotina fixa"}${t.obrigatoria_fecho?" · necessária para fechar":""}</small></span></label>`).join(""):'<p class="texto-suave">Ainda não existem tarefas para este dia.</p>';
