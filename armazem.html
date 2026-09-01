@@ -17,7 +17,8 @@
 <nav class="barra-lateral">
     <div class="marca"><img class="logo" src="img/logo.png" alt="Batardas" style="cursor:pointer;" onclick="irParaInicio()"></div>
     <button id="botaoMenuMobile" onclick="alternarMenuMobile()" aria-label="Menu"><i class="ti ti-menu-2" aria-hidden="true"></i></button>
-    <button class="nav-item activo" data-secao="picking"><i class="ti ti-clipboard-check" aria-hidden="true"></i> Picking</button>
+    <button class="nav-item activo" data-secao="encomendas"><i class="ti ti-shopping-cart" aria-hidden="true"></i> Encomendas</button>
+    <button class="nav-item" data-secao="picking"><i class="ti ti-clipboard-check" aria-hidden="true"></i> Picking</button>
     <button class="nav-item" data-secao="embalamento"><i class="ti ti-package" aria-hidden="true"></i> Embalamento <span class="contador" id="contadorEmbalamento" style="display:none;"></span></button>
     <button class="nav-item" data-secao="pedidos"><i class="ti ti-clipboard-list" aria-hidden="true"></i> Pedidos <span class="contador" id="contadorPedidos" style="display:none;"></span></button>
     <button class="nav-item" data-secao="movimentos"><i class="ti ti-arrows-exchange" aria-hidden="true"></i> Movimentos de stock</button>
@@ -42,7 +43,10 @@
 </header>
 
 <main>
-<section class="painel activo" data-secao="picking">
+<section class="painel activo" data-secao="encomendas">
+  <div class="cartao"><h2>Encomendas por estado e encaminhamento</h2><p class="texto-suave">O encaminhamento é uma sugestão: carregar stock comercial, embalar PA congelado, produzir, ou tratar uma encomenda mista. Consultar não movimenta stock.</p><div class="filtros" id="filtrosEncomendasR31"></div><table><thead><tr><th>Cliente</th><th>Entrega</th><th>Estado</th><th>Encaminhamento</th></tr></thead><tbody id="corpoEncomendasR31"></tbody></table></div>
+</section>
+<section class="painel" data-secao="picking">
 
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:14px; margin-bottom:24px;">
         <div class="cartao" style="margin-bottom:0; padding:16px;">
@@ -142,7 +146,8 @@
 </section>
 
 <section class="painel" data-secao="r3">
-    <div class="cartao"><h2>PA congelado por embalar</h2><p style="font-size:13px;color:var(--ink-suave)">O stock antes do embalamento é sempre UN. A quantidade produzida não muda; os consumos reduzem apenas o saldo.</p><table><thead><tr><th>Artigo</th><th>Lote interno</th><th>Estado</th><th>Produzido</th><th>Saldo</th><th>Armazém</th></tr></thead><tbody id="corpoPaInternoR3"></tbody></table></div>
+    <div class="cartao"><h2>Entregas da Produção por receber</h2><p class="texto-suave">Confirma a quantidade física recebida. Uma divergência exige explicação; a receção não cria nem reduz stock.</p><div id="passagensReceberR31"></div></div>
+    <div class="cartao"><h2>PA congelado por embalar</h2><p style="font-size:13px;color:var(--ink-suave)">O stock antes do embalamento é sempre UN. “Remanescente” é a quantidade ainda não consumida/embalada.</p><table><thead><tr><th>Artigo</th><th>Lote interno</th><th>Estado</th><th>Produzido</th><th>Remanescente</th><th>Armazém</th></tr></thead><tbody id="corpoPaInternoR3"></tbody></table></div>
     <div class="cartao"><h2>Caixas e paletes em stock</h2><p style="font-size:13px;color:var(--ink-suave)">As unidades logísticas organizam os PCK/UN contidos; não criam stock duplicado.</p><table><thead><tr><th>Código</th><th>Tipo</th><th>Estado</th><th>Conteúdo</th><th>Lote comercial</th><th>Armazém</th></tr></thead><tbody id="corpoUnidadesLogisticasR3"></tbody></table></div>
 </section>
 
@@ -251,6 +256,7 @@
         </p>
         <input id="rtLote" placeholder="Número do lote...">
         <button id="btnPesquisarRastreio" class="secundario" style="margin-top:10px;">Pesquisar</button>
+        <button id="btnPdfRastreio" class="secundario" style="margin-top:10px;">Exportar PDF</button>
         <div id="resultadoRastreio" style="margin-top:16px; font-size:13px;"></div>
     </div>
 </section>
@@ -305,12 +311,14 @@
 </div>
 
 <script src="js/supabaseClient.js"></script>
+<script src="js/rastreabilidade-r31.js"></script>
 <script>
 async function iniciar() {
     const contexto = await exigirRole(["armazem", "admin"]);
     if (!contexto) return;
     renderizarCabecalhoUtilizador(contexto.perfil, contexto.session.user.id);
     renderizarAcessosExtra(contexto.perfil);
+    aplicarModoOperacionalR31(contexto.perfil,"armazem");
     await inicializarAlertas();
     await carregar();
     await activarPesquisaArtigo("mArtigoTexto", "mArtigo", "mArtigoResultados", (artigoId) => carregarLotesDoArtigo(artigoId, "mLoteOrigem"));
@@ -325,6 +333,7 @@ async function iniciar() {
     await carregarStockPorZona();
     await carregarInventariosPendentes();
     await carregarFluxoR3();
+    await carregarEncomendasR31();
     await actualizarContadorMovimentosPendentesEnvio();
     await activarPesquisaArtigo("ivArtigoTexto", "ivArtigo", "ivArtigoResultados");
     await activarPesquisaArtigo("slArtigoTexto", "slArtigo", "slArtigoResultados", carregarConfiguracaoSemLoteR3);
@@ -575,7 +584,18 @@ async function marcarPronta(encomendaId) {
     toast("Picking concluído — passa para embalamento.", "sucesso");
 }
 
-const TITULOS_SECAO = { picking: "Picking", embalamento: "Embalamento", pedidos: "Pedidos de armazém", movimentos: "Movimentos de stock", zonas: "Stock & Zonas", r3: "Fluxo interno R3", inventario: "Inventário", qualidade: "Qualidade" };
+let encomendasR31=[];let filtroEncomendasR31="Todas";
+async function carregarEncomendasR31(){
+ const [{data,error},{data:rotas,error:erroRotas}]=await Promise.all([supabaseClient.from("encomendas").select("encomenda_id,data_entrega_pretendida,estado,clientes(nome)").order("data_entrega_pretendida"),supabaseClient.from("rotas_encomenda_r31").select("encomenda_id,rota,detalhe")]);
+ if(erroRotas){document.getElementById("corpoEncomendasR31").innerHTML=`<tr><td colspan="4" class="erro">${escaparHtml(traduzirErro(erroRotas.message))}</td></tr>`;return;}
+ if(error){document.getElementById("corpoEncomendasR31").innerHTML=`<tr><td colspan="4" class="erro">${escaparHtml(traduzirErro(error.message))}</td></tr>`;return;}
+ const mapa=Object.fromEntries((rotas||[]).map(r=>[r.encomenda_id,r]));encomendasR31=(data||[]).map(e=>({...e,rotaR31:mapa[e.encomenda_id]}));const estados=["Todas",...new Set(encomendasR31.map(e=>e.estado))];document.getElementById("filtrosEncomendasR31").innerHTML=estados.map(e=>`<button class="secundario ${e===filtroEncomendasR31?"activo":""}" data-estado-r31="${escaparHtml(e)}">${escaparHtml(e)}</button>`).join("");document.querySelectorAll("[data-estado-r31]").forEach(b=>b.onclick=()=>{filtroEncomendasR31=b.dataset.estadoR31;renderizarEncomendasR31();});renderizarEncomendasR31();
+}
+function renderizarEncomendasR31(){
+ const lista=filtroEncomendasR31==="Todas"?encomendasR31:encomendasR31.filter(e=>e.estado===filtroEncomendasR31);document.getElementById("corpoEncomendasR31").innerHTML=lista.map(e=>{const rota=e.rotaR31?.rota||"por analisar";return `<tr><td>${escaparHtml(e.clientes?.nome||"—")}</td><td>${formatarData(e.data_entrega_pretendida)}</td><td><span class="badge ${CLASSE_ESTADO[e.estado]||""}">${escaparHtml(e.estado)}</span></td><td><strong>${escaparHtml(rota)}</strong></td></tr>`;}).join("")||'<tr><td colspan="4" class="texto-suave">Sem encomendas neste estado.</td></tr>';
+}
+
+const TITULOS_SECAO = { encomendas:"Encomendas", picking: "Picking", embalamento: "Embalamento", pedidos: "Pedidos de armazém", movimentos: "Movimentos de stock", zonas: "Stock & Zonas", r3: "Fluxo interno R3", inventario: "Inventário", qualidade: "Qualidade" };
 
 function mudarSecao(secao) {
     document.querySelectorAll(".nav-item").forEach((btn) => btn.classList.toggle("activo", btn.dataset.secao === secao));
@@ -625,8 +645,8 @@ let ultimoStockPorZona = [];
 
 async function carregarStockPorZona() {
     const [{data:comLote,error:erroLote},{data:semLote,error:erroSemLote}] = await Promise.all([
-        supabaseClient.from("lotes_artigo").select("numero_lote, quantidade_atual, localizacao_id, artigos(designacao, unidade_stock), localizacoes(nome)").gt("quantidade_atual",0).order("numero_lote"),
-        supabaseClient.from("stock_artigo_sem_lote").select("quantidade_atual, localizacao_id, artigos(designacao, unidade_stock), localizacoes(nome)").gt("quantidade_atual",0),
+        supabaseClient.from("lotes_artigo").select("numero_lote, quantidade_atual, localizacao_id, artigos(artigo_id,designacao, unidade_stock), localizacoes(nome)").gt("quantidade_atual",0).order("numero_lote"),
+        supabaseClient.from("stock_artigo_sem_lote").select("quantidade_atual, localizacao_id, artigos(artigo_id,designacao, unidade_stock), localizacoes(nome)").gt("quantidade_atual",0),
     ]);
     if (erroLote || erroSemLote) { console.error(erroLote || erroSemLote); return; }
     ultimoStockPorZona = [...(comLote ?? []), ...(semLote ?? []).map(x=>({...x,numero_lote:null}))];
@@ -646,6 +666,8 @@ function renderizarStockPorZona() {
             <td data-rotulo="Lote" class="mono">${l.numero_lote ? escaparHtml(l.numero_lote) : "— sem lote"}</td>
             <td data-rotulo="Quantidade">${l.quantidade_atual} ${escaparHtml(formatarUnidadeStock(l.artigos?.unidade_stock))}</td>
         `;
+        tr.style.cursor="pointer";
+        tr.addEventListener("click",()=>location.href=`artigo.html?id=${encodeURIComponent(l.artigos?.artigo_id||"")}${l.numero_lote?`&lote=${encodeURIComponent(l.numero_lote)}`:""}`);
         corpo.appendChild(tr);
     });
 }
@@ -676,6 +698,8 @@ document.getElementById("btnExportarStockZona").addEventListener("click", async 
 document.getElementById("btnPesquisarRastreio").addEventListener("click", async () => {
     const numeroLote = document.getElementById("rtLote").value.trim();
     const resultadoEl = document.getElementById("resultadoRastreio");
+    await pesquisarRastreioR31(numeroLote, resultadoEl);
+    return;
     if (!numeroLote) { resultadoEl.textContent = "Escreve um número de lote."; return; }
     resultadoEl.textContent = "A procurar...";
 
@@ -740,6 +764,7 @@ document.getElementById("btnPesquisarRastreio").addEventListener("click", async 
     }
     resultadoEl.innerHTML = html;
 });
+document.getElementById("btnPdfRastreio").addEventListener("click",()=>exportarRastreioPdfR31());
 
 // --- Inventário ------------------------------------------------------------
 let inventarioActualId = null;
@@ -961,12 +986,15 @@ async function removerDoPlanoEmbalamento(id) {
 document.getElementById("peData").addEventListener("change", carregarPlanoEmbalamentoDoDia);
 
 async function carregarFluxoR3() {
-    const [{data:lotes,error:erroLotes},{data:unidades,error:erroUnidades}]=await Promise.all([
+    const [{data:lotes,error:erroLotes},{data:unidades,error:erroUnidades},{data:passagens,error:erroPassagens}]=await Promise.all([
         supabaseClient.from("lotes_internos").select("numero_lote,estado,quantidade_produzida,quantidade_disponivel,unidade_base,artigos(designacao),localizacoes(nome)").eq("tipo","pa").order("produzido_em",{ascending:false}),
         supabaseClient.from("unidades_logisticas").select("codigo,tipo,estado,quantidade_conteudo,unidade_conteudo,lotes_comerciais(numero_lote),localizacoes(nome)").neq("estado","expedida").order("criada_em",{ascending:false}),
+        supabaseClient.from("passagens_pa_r31").select("id,quantidade,destino,estado,encomenda_id,lotes_internos(numero_lote,artigos(designacao))").eq("estado","entregue").order("entregue_em"),
     ]);
-    if(erroLotes||erroUnidades){console.error(erroLotes||erroUnidades);return;}
-    document.getElementById("corpoPaInternoR3").innerHTML=(lotes||[]).map(l=>`<tr><td data-rotulo="Artigo">${escaparHtml(l.artigos?.designacao??"—")}</td><td data-rotulo="Lote" class="mono">${escaparHtml(l.numero_lote)}</td><td data-rotulo="Estado">${escaparHtml(l.estado)}</td><td data-rotulo="Produzido">${l.quantidade_produzida} ${formatarUnidadeStock(l.unidade_base)}</td><td data-rotulo="Saldo">${l.quantidade_disponivel} ${formatarUnidadeStock(l.unidade_base)}</td><td data-rotulo="Armazém">${escaparHtml(l.localizacoes?.nome??"—")}</td></tr>`).join("")||`<tr><td colspan="6">Sem lotes internos de PA.</td></tr>`;
+    if(erroLotes||erroUnidades||erroPassagens){console.error(erroLotes||erroUnidades||erroPassagens);return;}
+    document.getElementById("passagensReceberR31").innerHTML=(passagens||[]).map(p=>`<div class="etapa-stock-r31"><strong>${escaparHtml(p.lotes_internos?.artigos?.designacao||"—")} · ${escaparHtml(p.lotes_internos?.numero_lote||"—")}</strong><p>${p.quantidade} UN · destino ${escaparHtml(p.destino)}</p><div class="linha-form"><input type="number" min="0" max="${p.quantidade}" value="${p.quantidade}" data-qtd-receber="${p.id}"><input placeholder="Explica apenas se houver divergência" data-div-receber="${p.id}"><button data-receber-pa="${p.id}">Confirmar receção</button></div></div>`).join("")||'<p class="texto-suave">Sem entregas pendentes.</p>';
+    document.querySelectorAll("[data-receber-pa]").forEach(b=>b.onclick=async()=>{const id=b.dataset.receberPa,q=Number(document.querySelector(`[data-qtd-receber="${id}"]`).value),div=document.querySelector(`[data-div-receber="${id}"]`).value||null;const {error}=await supabaseClient.rpc("receber_pa_r31",{p_passagem:id,p_quantidade_recebida:q,p_divergencia:div});if(error){toast(traduzirErro(error.message),"erro");return;}toast("Receção confirmada.","sucesso");await carregarFluxoR3();});
+    document.getElementById("corpoPaInternoR3").innerHTML=(lotes||[]).map(l=>`<tr><td data-rotulo="Artigo">${escaparHtml(l.artigos?.designacao??"—")}</td><td data-rotulo="Lote" class="mono">${escaparHtml(l.numero_lote)}</td><td data-rotulo="Estado">${escaparHtml(l.estado)}</td><td data-rotulo="Produzido">${l.quantidade_produzida} ${formatarUnidadeStock(l.unidade_base)}</td><td data-rotulo="Remanescente">${l.quantidade_disponivel} ${formatarUnidadeStock(l.unidade_base)}</td><td data-rotulo="Armazém">${escaparHtml(l.localizacoes?.nome??"—")}</td></tr>`).join("")||`<tr><td colspan="6">Sem lotes internos de PA.</td></tr>`;
     document.getElementById("corpoUnidadesLogisticasR3").innerHTML=(unidades||[]).map(u=>`<tr><td data-rotulo="Código" class="mono">${escaparHtml(u.codigo)}</td><td data-rotulo="Tipo">${escaparHtml(u.tipo)}</td><td data-rotulo="Estado">${escaparHtml(u.estado)}</td><td data-rotulo="Conteúdo">${u.quantidade_conteudo} ${formatarUnidadeStock(u.unidade_conteudo)}</td><td data-rotulo="Lote">${escaparHtml(u.lotes_comerciais?.numero_lote??"—")}</td><td data-rotulo="Armazém">${escaparHtml(u.localizacoes?.nome??"—")}</td></tr>`).join("")||`<tr><td colspan="6">Sem caixas ou paletes.</td></tr>`;
 }
 

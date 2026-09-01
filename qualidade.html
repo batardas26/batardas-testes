@@ -133,6 +133,7 @@ async function iniciar() {
     const contexto = await exigirRole(["qualidade", "admin"]);
     if (!contexto) return;
     renderizarCabecalhoUtilizador(contexto.perfil, contexto.session.user.id);
+    aplicarModoOperacionalR31(contexto.perfil,"qualidade");
     renderizarAcessosExtra(contexto.perfil);
     await inicializarAlertas();
 

@@ -8,7 +8,7 @@
 <link rel="icon" href="img/logo.png" type="image/png"><link rel="stylesheet" href="css/style.css">
 </head>
 <body class="pagina-inicio">
-<aside class="ambiente-testes">BATARDAS · TESTES — R3</aside>
+<aside class="ambiente-testes">BATARDAS · TESTES — R3.1</aside>
 <header class="inicio-topo">
     <div class="inicio-marca"><img src="img/logo.png" alt="Batardas"><div><strong>Centro operacional</strong><small>Início e fecho de turno</small></div></div>
     <div><span class="utilizador" id="nomeUtilizador"></span><button class="secundario" onclick="terminarSessao()">Sair</button></div>
@@ -16,7 +16,7 @@
 <main class="inicio-conteudo">
     <section class="inicio-boas-vindas">
         <div><p class="inicio-data" id="dataHoje"></p><h1 id="saudacao">Bom trabalho.</h1><p>Regista o plano no início, as exceções quando acontecem e confirma os valores reais no fim do turno.</p></div>
-        <span class="badge-r3">R3 · TESTES</span>
+        <span class="badge-r3">R3.1 · TESTES</span>
     </section>
 
     <section class="inicio-grelha-resumo" aria-label="Resumo operacional">
@@ -32,15 +32,14 @@
             <div id="modulosDisponiveis" class="grelha-modulos"></div>
         </div>
         <div class="cartao">
-            <h2>Checklist do turno</h2>
-            <label class="check-turno"><input type="checkbox" data-check="plano"> Rever encomendas, reservas e plano</label>
-            <label class="check-turno"><input type="checkbox" data-check="materiais"> Confirmar materiais e lotes elegíveis</label>
-            <label class="check-turno"><input type="checkbox" data-check="reais"> Registar quantidades reais, quebras e exceções</label>
-            <label class="check-turno"><input type="checkbox" data-check="passagens"> Confirmar passagens entre Produção e Armazém</label>
-            <label class="check-turno"><input type="checkbox" data-check="email"> Enviar movimentos ainda não enviados</label>
-            <p class="nota-turno">A checklist orienta o trabalho; não altera stock e não fecha registos automaticamente.</p>
+            <h2>Dia operacional</h2>
+            <div id="controloDiaR31"></div>
+            <div id="checklistDiaR31"><p class="texto-suave">A carregar tarefas…</p></div>
+            <div id="novaTarefaR31" style="display:none;margin-top:12px;"><input id="tituloNovaTarefaR31" placeholder="Nova tarefa a atribuir"><button id="btnNovaTarefaR31">Adicionar tarefa</button></div>
+            <p class="nota-turno">A checklist é viva: as tarefas automáticas só aparecem quando existem planos, movimentos ou trabalho em curso. Nunca altera stock.</p>
         </div>
     </section>
+    <section id="previewPerfisR31" class="cartao" style="display:none;margin-top:24px;"></section>
 </main>
 <script src="js/supabaseClient.js"></script>
 <script>
@@ -58,14 +57,34 @@ async function iniciarHomepage() {
     const session = await exigirSessao(); if (!session) return;
     const perfil = await obterPerfil(session.user.id); if (!perfil) return;
     if (!perfil.perfil_completo) { location.href="completar-perfil.html"; return; }
-    document.getElementById("nomeUtilizador").textContent = perfil.nome;
-    const acessos = new Set([perfil.role, ...(perfil.acessosExtra||[])]);
-    document.getElementById("modulosDisponiveis").innerHTML = MODULOS.filter(m => m.roles.some(r=>acessos.has(r))).map(m =>
-        `<a class="cartao-modulo" href="${m.href}"><i class="ti ti-${m.icon}"></i><span>${escaparHtml(m.nome)}</span><i class="ti ti-chevron-right"></i></a>`
-    ).join("");
+    await renderizarCabecalhoUtilizador(perfil, session.user.id);
+    await instalarPedidoRapidoManutencao(perfil);
+    renderizarModulos(perfil);
+    if(perfil.super_admin) instalarPreviewPerfis(perfil);
     const agora = new Date();
     document.getElementById("dataHoje").textContent = agora.toLocaleDateString("pt-PT", {weekday:"long", day:"numeric", month:"long"});
     document.getElementById("saudacao").textContent = `${agora.getHours()<13?"Bom dia":agora.getHours()<20?"Boa tarde":"Boa noite"}, ${perfil.nome.split(" ")[0]}.`;
+
+    await Promise.all([carregarKpis(session), carregarDiaOperacional(perfil, session.user.id)]);
+}
+
+function renderizarModulos(perfil, roleVisual=null) {
+    const acessos = roleVisual ? new Set([roleVisual]) : new Set([perfil.role, ...(perfil.acessosExtra||[])]);
+    document.getElementById("modulosDisponiveis").innerHTML = MODULOS.filter(m => m.roles.some(r=>acessos.has(r))).map(m =>
+        `<a class="cartao-modulo" href="${m.href}"><i class="ti ti-${m.icon}"></i><span>${escaparHtml(m.nome)}</span><i class="ti ti-chevron-right"></i></a>`
+    ).join("");
+}
+
+function instalarPreviewPerfis(perfil) {
+    const caixa=document.getElementById("previewPerfisR31"); caixa.style.display="block";
+    caixa.innerHTML=`<h2>Pré-visualizar página inicial por perfil</h2><p class="texto-suave">Apenas altera esta vista em Testes; não concede permissões e não substitui o teste com uma conta real.</p><div class="perfil-preview-r31"><select id="perfilVisualR31"><option value="">O meu perfil real</option>${Object.entries(NOME_ROLE_PARTILHADO).map(([v,n])=>`<option value="${v}">${n}</option>`).join("")}</select><span id="avisoPreviewR31"></span></div>`;
+    caixa.querySelector("select").addEventListener("change",e=>{
+        renderizarModulos(perfil,e.target.value||null);
+        document.getElementById("avisoPreviewR31").textContent=e.target.value?"Pré-visualização visual ativa":"";
+    });
+}
+
+async function carregarKpis(session) {
 
     const [envios,enviosSemLote,lotes,embalar,caixas] = await Promise.all([
         supabaseClient.from("movimentos_stock").select("*",{count:"exact",head:true}).eq("responsavel",session.user.id).in("estado_envio_email",["por_enviar","falhou"]),
@@ -78,10 +97,59 @@ async function iniciarHomepage() {
     document.getElementById("kpiLotes").textContent=lotes.count??0;
     document.getElementById("kpiEmbalar").textContent=(embalar.data||[]).reduce((s,x)=>s+Number(x.quantidade_disponivel),0)+" UN";
     document.getElementById("kpiCaixas").textContent=caixas.count??0;
+}
 
-    const chave=`batardas_check_turno_${agora.toISOString().slice(0,10)}_${session.user.id}`;
-    let estado={}; try { estado=JSON.parse(localStorage.getItem(chave)||"{}"); } catch {}
-    document.querySelectorAll("[data-check]").forEach(c=>{c.checked=!!estado[c.dataset.check]; c.addEventListener("change",()=>{estado[c.dataset.check]=c.checked;localStorage.setItem(chave,JSON.stringify(estado));});});
+const AREA_DO_ROLE={producao:"producao",armazem:"armazem",qualidade:"qualidade",manutencao:"manutencao"};
+let diaAtualR31=null;
+async function carregarDiaOperacional(perfil,userId) {
+    const areasResponsavel=(perfil.acessosArea||[]).filter(a=>a.nivel==="responsavel"&&AREA_DO_ROLE[a.area]).map(a=>a.area);
+    const controlo=document.getElementById("controloDiaR31");
+    if(!areasResponsavel.length){
+        controlo.innerHTML='<p class="texto-suave">Vês apenas tarefas que te foram atribuídas por um responsável.</p>';
+        const {data:tarefas}=await supabaseClient.from("tarefas_dia_r31").select("id,titulo,origem,concluida,dias_operacionais_r31!inner(estado,data_operacional,area)").eq("atribuida_a",userId).eq("dias_operacionais_r31.estado","aberto");
+        renderizarTarefas(tarefas||[],false); return;
+    }
+    controlo.innerHTML=`<div class="estado-dia-r31"><select id="areaDiaR31">${areasResponsavel.map(a=>`<option value="${a}">${a[0].toUpperCase()+a.slice(1)}</option>`).join("")}</select><span id="estadoDiaR31">A verificar…</span></div><div class="linha-form"><button id="btnAbrirDiaR31">Abrir dia</button><button id="btnFecharDiaR31" class="secundario">Fechar dia</button></div><textarea id="notaContinuidadeR31" placeholder="Continuidade para amanhã, férias ou delegação (opcional)"></textarea>`;
+    controlo.querySelector("#areaDiaR31").onchange=lerDiaAberto;
+    controlo.querySelector("#btnAbrirDiaR31").onclick=abrirDia;
+    controlo.querySelector("#btnFecharDiaR31").onclick=fecharDia;
+    document.getElementById("novaTarefaR31").style.display="block";
+    document.getElementById("btnNovaTarefaR31").onclick=adicionarTarefa;
+    await lerDiaAberto();
+}
+
+async function lerDiaAberto(){
+    const area=document.getElementById("areaDiaR31")?.value; if(!area)return;
+    const {data}=await supabaseClient.from("dias_operacionais_r31").select("id,estado,data_operacional,aberto_em,nota_continuidade").eq("area",area).eq("estado","aberto").maybeSingle();
+    diaAtualR31=data||null;
+    document.getElementById("estadoDiaR31").textContent=data?`Aberto em ${formatarData(data.data_operacional)}`:"Sem dia aberto";
+    if(data) await supabaseClient.rpc("sincronizar_checklist_dia_r31",{p_dia:data.id});
+    await lerTarefas();
+}
+async function abrirDia(){
+    const area=document.getElementById("areaDiaR31").value;
+    const {error}=await supabaseClient.rpc("abrir_dia_operacional_r31",{p_area:area,p_data:new Date().toISOString().slice(0,10)});
+    if(error){toast(traduzirErro(error.message),"erro");return;} toast("Dia operacional aberto.","sucesso"); await lerDiaAberto();
+}
+async function fecharDia(){
+    if(!diaAtualR31){toast("Não existe um dia aberto nesta área.","erro");return;}
+    const {error}=await supabaseClient.rpc("fechar_dia_operacional_r31",{p_dia:diaAtualR31.id,p_nota_continuidade:document.getElementById("notaContinuidadeR31").value||null});
+    if(error){toast(traduzirErro(error.message),"erro");return;} toast("Dia operacional fechado.","sucesso"); await lerDiaAberto();
+}
+async function lerTarefas(){
+    if(!diaAtualR31){renderizarTarefas([],true);return;}
+    const {data,error}=await supabaseClient.from("tarefas_dia_r31").select("id,titulo,origem,concluida,obrigatoria_fecho,observacoes").eq("dia_id",diaAtualR31.id).order("criada_em");
+    if(error){document.getElementById("checklistDiaR31").innerHTML=`<p class="erro">${escaparHtml(traduzirErro(error.message))}</p>`;return;} renderizarTarefas(data||[],true);
+}
+function renderizarTarefas(tarefas,podeGerir){
+    document.getElementById("checklistDiaR31").innerHTML=tarefas.length?tarefas.map(t=>`<label class="check-turno"><input type="checkbox" data-tarefa="${t.id}" ${t.concluida?"checked":""} ${podeGerir?"":"disabled"}><span>${escaparHtml(t.titulo)}<small>${t.origem==="automatica"?"Gerada por atividade real":t.origem==="atribuida"?"Atribuída pelo responsável":"Rotina fixa"}${t.obrigatoria_fecho?" · necessária para fechar":""}</small></span></label>`).join(""):'<p class="texto-suave">Ainda não existem tarefas para este dia.</p>';
+    if(podeGerir)document.querySelectorAll("[data-tarefa]").forEach(c=>c.onchange=async()=>{const {error}=await supabaseClient.rpc("concluir_tarefa_dia_r31",{p_tarefa:c.dataset.tarefa,p_concluida:c.checked,p_observacoes:null});if(error){c.checked=!c.checked;toast(traduzirErro(error.message),"erro");}});
+}
+async function adicionarTarefa(){
+    if(!diaAtualR31){toast("Abre primeiro o dia operacional.","erro");return;}
+    const campo=document.getElementById("tituloNovaTarefaR31"),titulo=campo.value.trim(); if(!titulo)return;
+    const {error}=await supabaseClient.rpc("adicionar_tarefa_dia_r31",{p_dia:diaAtualR31.id,p_titulo:titulo,p_atribuida_a:null,p_obrigatoria:true});
+    if(error){toast(traduzirErro(error.message),"erro");return;} campo.value=""; await lerTarefas();
 }
 iniciarHomepage();
 </script>

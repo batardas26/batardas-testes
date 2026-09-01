@@ -123,11 +123,11 @@
     <div class="cartao">
         <h2>Artigos</h2>
         <p style="font-size:13px; color:var(--ink-suave); margin-top:-8px;">
-            Clica num artigo para o carregares na "Lista de artigos e stock", em Produção &amp; Lotes, onde podes editar designação, unidade e conversões.
+            Clica num artigo para abrir a ficha única com stock por etapa, lotes, movimentos e rastreabilidade.
         </p>
         <input id="laFiltro" placeholder="Pesquisar por código ou nome..." style="font-size:16px; padding:14px 16px; margin-bottom:16px;">
         <table>
-            <thead><tr><th>Referência</th><th>Designação</th><th>Tipo</th><th>Unidade</th><th>Stock total</th></tr></thead>
+            <thead><tr><th>Referência</th><th>Designação</th><th>Tipo</th><th>Unidade</th><th>Stock por etapa</th></tr></thead>
             <tbody id="corpoListaArtigos"></tbody>
         </table>
     </div>
@@ -325,6 +325,7 @@
         </p>
         <input id="rtLote" placeholder="Número do lote...">
         <button id="btnPesquisarRastreio" class="secundario" style="margin-top:10px;">Pesquisar</button>
+        <button id="btnPdfRastreio" class="secundario" style="margin-top:10px;">Exportar PDF</button>
         <div id="resultadoRastreio" style="margin-top:16px; font-size:13px;"></div>
     </div>
 
@@ -657,6 +658,13 @@
         </div>
         <p id="erroAcessosExtra" class="erro"></p>
     </div>
+    <div class="cartao" id="cartaoPermissoesR31" style="display:none;">
+        <h2>Permissões operacionais R3.1</h2>
+        <p class="texto-suave">Define o nível em cada área. “Admin” acompanha e aprova; não executa automaticamente tarefas dos responsáveis.</p>
+        <select id="paUtilizadorR31"><option value="">Escolhe um utilizador…</option></select>
+        <table><thead><tr><th>Área</th><th>Nível</th></tr></thead><tbody id="corpoPermissoesR31"></tbody></table>
+        <button id="btnGuardarPermissoesR31">Guardar permissões</button><p id="erroPermissoesR31" class="erro"></p>
+    </div>
 </section>
 
 <section class="painel" data-secao="financeiro">
@@ -813,6 +821,7 @@
 </div>
 
 <script src="js/supabaseClient.js"></script>
+<script src="js/rastreabilidade-r31.js"></script>
 <script>
 async function iniciar() {
     const contexto = await exigirRole(["admin"]);
@@ -829,8 +838,10 @@ async function iniciar() {
         document.getElementById("navImportar").style.display = "flex";
         document.getElementById("cartaoCriarUtilizador").style.display = "block";
         document.getElementById("cartaoAcessosExtra").style.display = "block";
+        document.getElementById("cartaoPermissoesR31").style.display = "block";
         document.getElementById("cartaoZonasAuditoria").style.display = "block";
         await carregarUtilizadoresParaAcessosExtra();
+        await carregarUtilizadoresPermissoesR31();
         await carregarEtiquetasConhecidas();
         await carregarZonasAuditoria();
     }
@@ -1964,6 +1975,34 @@ async function carregarUtilizadores() {
     });
 }
 
+const AREAS_R31=["producao","armazem","qualidade","manutencao","administracao"];
+const NIVEIS_R31=["sem_acesso","consulta","operador","responsavel","admin"];
+async function carregarUtilizadoresPermissoesR31(){
+    const {data}=await supabaseClient.from("perfis").select("id,nome,role").order("nome");
+    document.getElementById("paUtilizadorR31").innerHTML='<option value="">Escolhe um utilizador…</option>'+ (data||[]).map(p=>`<option value="${p.id}">${escaparHtml(p.nome)} (${escaparHtml(NOME_ROLE[p.role]||p.role)})</option>`).join("");
+    renderizarPermissoesR31([]);
+}
+function renderizarPermissoesR31(acessos){
+    const mapa=Object.fromEntries((acessos||[]).map(a=>[a.area,a.nivel]));
+    document.getElementById("corpoPermissoesR31").innerHTML=AREAS_R31.map(area=>`<tr><td>${area[0].toUpperCase()+area.slice(1)}</td><td><select data-area-r31="${area}">${NIVEIS_R31.map(n=>`<option value="${n}" ${(mapa[area]||"sem_acesso")===n?"selected":""}>${n.replace("_"," ")}</option>`).join("")}</select></td></tr>`).join("");
+}
+document.getElementById("paUtilizadorR31").addEventListener("change",async e=>{
+    if(!e.target.value){renderizarPermissoesR31([]);return;}
+    const {data,error}=await supabaseClient.from("acessos_area_r31").select("area,nivel").eq("perfil_id",e.target.value);
+    if(error){document.getElementById("erroPermissoesR31").textContent=traduzirErro(error.message);return;} renderizarPermissoesR31(data);
+});
+document.getElementById("btnGuardarPermissoesR31").addEventListener("click",async()=>{
+    const perfilId=document.getElementById("paUtilizadorR31").value,erro=document.getElementById("erroPermissoesR31");erro.textContent="";
+    if(!perfilId){erro.textContent="Escolhe um utilizador.";return;}
+    const linhas=[...document.querySelectorAll("[data-area-r31]")];
+    for(const campo of linhas){
+        const area=campo.dataset.areaR31,nivel=campo.value;
+        const pedido=nivel==="sem_acesso"?supabaseClient.from("acessos_area_r31").delete().eq("perfil_id",perfilId).eq("area",area):supabaseClient.from("acessos_area_r31").upsert({perfil_id:perfilId,area,nivel},{onConflict:"perfil_id,area"});
+        const {error}=await pedido;if(error){erro.textContent=traduzirErro(error.message);return;}
+    }
+    toast("Permissões operacionais guardadas.","sucesso");
+});
+
 async function reporPassword(userId, nome) {
     if (!confirm(`Repor a password de ${nome}? A password antiga deixa de funcionar de imediato.`)) return;
     const resultado = await chamarGestaoUtilizadores({ acao: "repor_password", userId });
@@ -2168,13 +2207,14 @@ async function carregarListaArtigos() {
         .from("artigos").select("artigo_id, ref_primavera, designacao, unidade, unidade_stock, configuracao_unidades_confirmada, tipo_produto").order("designacao");
     if (error) { console.error(error); return; }
 
-    const { data: lotes } = await supabaseClient.from("lotes_artigo").select("artigo_id, quantidade_atual");
+    const { data: stock } = await supabaseClient.from("stock_artigo_r31").select("artigo_id,etapa,disponivel,unidade");
     const stockPorArtigo = {};
-    (lotes ?? []).forEach((l) => {
-        stockPorArtigo[l.artigo_id] = (stockPorArtigo[l.artigo_id] || 0) + Number(l.quantidade_atual);
+    (stock ?? []).forEach((l) => {
+        stockPorArtigo[l.artigo_id] ??= {};
+        stockPorArtigo[l.artigo_id][l.etapa] = (stockPorArtigo[l.artigo_id][l.etapa] || 0) + Number(l.disponivel);
     });
 
-    todosArtigosComStock = artigos.map((a) => ({ ...a, stock: stockPorArtigo[a.artigo_id] || 0 }));
+    todosArtigosComStock = artigos.map((a) => ({ ...a, stockEtapas: stockPorArtigo[a.artigo_id] || {} }));
     renderizarListaArtigos();
 }
 
@@ -2195,14 +2235,10 @@ function renderizarListaArtigos() {
             <td data-rotulo="Designação">${escaparHtml(a.designacao)}</td>
             <td data-rotulo="Tipo">${escaparHtml(NOME_TIPO_PRODUTO[a.tipo_produto] ?? "Matéria-prima")}</td>
             <td data-rotulo="Unidade">${escaparHtml(formatarUnidadeStock(a.unidade_stock))}${a.configuracao_unidades_confirmada ? "" : " · configurar"}</td>
-            <td data-rotulo="Stock total">${a.stock.toFixed(2)}</td>
+            <td data-rotulo="Stock por etapa">${Object.entries(a.stockEtapas).map(([e,q])=>`${escaparHtml(e)}: ${Number(q).toFixed(2)}`).join(" · ")||"Sem stock"}</td>
         `;
         tr.addEventListener("click", () => {
-            document.getElementById("uArtigoTexto").value = `${a.ref_primavera} — ${a.designacao}`;
-            document.getElementById("uArtigo").value = a.artigo_id;
-            carregarConversoesExistentes(a.artigo_id);
-            mudarSecao("producao");
-            setTimeout(() => document.getElementById("uArtigoTexto").scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+            location.href=`artigo.html?id=${encodeURIComponent(a.artigo_id)}`;
         });
         corpo.appendChild(tr);
     });
@@ -3076,6 +3112,8 @@ document.getElementById("btnExportarStockActual").addEventListener("click", asyn
 document.getElementById("btnPesquisarRastreio").addEventListener("click", async () => {
     const numeroLote = document.getElementById("rtLote").value.trim();
     const resultadoEl = document.getElementById("resultadoRastreio");
+    await pesquisarRastreioR31(numeroLote, resultadoEl);
+    return;
     if (!numeroLote) { resultadoEl.textContent = "Escreve um número de lote."; return; }
     resultadoEl.textContent = "A procurar...";
 
@@ -3121,6 +3159,7 @@ document.getElementById("btnPesquisarRastreio").addEventListener("click", async 
     }
     resultadoEl.innerHTML = html;
 });
+document.getElementById("btnPdfRastreio").addEventListener("click",()=>exportarRastreioPdfR31());
 
 // --- Inventário — pedir e rever -------------------------------------------
 async function carregarZonasParaInventario() {

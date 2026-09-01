@@ -20,6 +20,7 @@
     <button class="nav-item activo" data-secao="encomendas"><i class="ti ti-package" aria-hidden="true"></i> Encomendas</button>
     <button class="nav-item" data-secao="producao"><i class="ti ti-tools-kitchen-2" aria-hidden="true"></i> Produção diária</button>
     <button class="nav-item" data-secao="plano"><i class="ti ti-calendar-week" aria-hidden="true"></i> Plano de produção</button>
+    <button class="nav-item" data-secao="passagens"><i class="ti ti-package-export" aria-hidden="true"></i> Entregar ao armazém</button>
     <button class="nav-item" data-secao="pedidos"><i class="ti ti-clipboard-list" aria-hidden="true"></i> Pedidos ao armazém</button>
     <button class="nav-item" data-secao="movimentos"><i class="ti ti-arrows-exchange" aria-hidden="true"></i> Movimentos de stock</button>
     <button class="nav-item" data-secao="qualidade"><i class="ti ti-clipboard-check" aria-hidden="true"></i> Qualidade</button>
@@ -57,6 +58,11 @@
         </thead>
         <tbody id="corpoTabela"></tbody>
     </table>
+</section>
+
+<section class="painel" data-secao="passagens">
+ <div class="cartao"><h2>Entregar PA congelado ao Armazém</h2><p class="texto-suave">A entrega pode destinar-se a stock, embalamento ou a uma encomenda. Registar a passagem não reduz nem duplica stock.</p><div id="listaEntregasPaR31"></div></div>
+ <div class="cartao"><h2>Passagens recentes</h2><div id="historicoEntregasPaR31"></div></div>
 </section>
 
 <section class="painel" data-secao="producao">
@@ -231,6 +237,7 @@ async function iniciar() {
     if (!contexto) return;
     renderizarCabecalhoUtilizador(contexto.perfil, contexto.session.user.id);
     renderizarAcessosExtra(contexto.perfil);
+    aplicarModoOperacionalR31(contexto.perfil,"producao");
     await inicializarAlertas();
     await carregar();
     await activarPesquisaArtigo("fArtigoTexto", "fArtigo", "fArtigoResultados", carregarLotesDisponiveisParaPedido);
@@ -242,6 +249,7 @@ async function iniciar() {
     await carregarPlanoDoDia();
     await actualizarContadorMovimentosPendentesEnvio();
     await carregarProducaoDiaria();
+    await carregarPassagensPaR31();
 
     // Actualiza sozinho quando alguém (tu, Fernando) mexer nas encomendas
     supabaseClient
@@ -804,9 +812,22 @@ document.getElementById("btnPedirEmFalta").addEventListener("click", async () =>
     carregarPedidos();
 });
 
+async function carregarPassagensPaR31(){
+ const [{data:lotes,error},{data:passagens},{data:encomendas}]=await Promise.all([
+  supabaseClient.from("lotes_internos").select("id,numero_lote,quantidade_disponivel,artigos(designacao)").eq("tipo","pa").eq("estado","disponivel_embalamento").gt("quantidade_disponivel",0),
+  supabaseClient.from("passagens_pa_r31").select("id,lote_interno_id,quantidade,quantidade_recebida,destino,estado,entregue_em,lotes_internos(numero_lote,artigos(designacao))").order("entregue_em",{ascending:false}).limit(30),
+  supabaseClient.from("encomendas").select("encomenda_id,clientes(nome),data_entrega_pretendida").in("estado",["Registada","Em Produção","Em Preparação","Pronta"])
+ ]);
+ if(error){document.getElementById("listaEntregasPaR31").innerHTML=`<p class="erro">${escaparHtml(traduzirErro(error.message))}</p>`;return;}
+ const comprometido={};(passagens||[]).filter(p=>["entregue","recebida"].includes(p.estado)).forEach(p=>comprometido[p.lote_interno_id]=(comprometido[p.lote_interno_id]||0)+Number(p.quantidade));
+ document.getElementById("listaEntregasPaR31").innerHTML=(lotes||[]).map(l=>{const restante=Math.max(0,Number(l.quantidade_disponivel)-(comprometido[l.id]||0));return `<div class="etapa-stock-r31"><strong>${escaparHtml(l.artigos?.designacao||"—")} · ${escaparHtml(l.numero_lote)}</strong><p>Disponível para nova passagem: ${restante} UN</p><div class="linha-form"><input type="number" min="0.01" max="${restante}" step="0.01" placeholder="Quantidade UN" data-qtd-entrega="${l.id}"><select data-destino-entrega="${l.id}"><option value="stock">Stock</option><option value="embalamento">Embalamento</option><option value="encomenda">Encomenda</option></select><select data-encomenda-entrega="${l.id}"><option value="">Sem encomenda</option>${(encomendas||[]).map(e=>`<option value="${e.encomenda_id}">${escaparHtml(e.clientes?.nome||"—")} · ${formatarData(e.data_entrega_pretendida)}</option>`).join("")}</select><button data-entregar-pa="${l.id}" ${restante<=0?"disabled":""}>Entregar</button></div></div>`;}).join("")||'<p class="texto-suave">Sem PA congelado disponível para nova passagem.</p>';
+ document.querySelectorAll("[data-entregar-pa]").forEach(b=>b.onclick=async()=>{const id=b.dataset.entregarPa,q=Number(document.querySelector(`[data-qtd-entrega="${id}"]`).value),destino=document.querySelector(`[data-destino-entrega="${id}"]`).value,encomenda=document.querySelector(`[data-encomenda-entrega="${id}"]`).value||null;if(!q||(destino==="encomenda"&&!encomenda)){toast("Indica quantidade e, quando aplicável, a encomenda.","erro");return;}const {error:erro}=await supabaseClient.rpc("entregar_pa_r31",{p_lote:id,p_quantidade:q,p_destino:destino,p_encomenda:encomenda,p_observacoes:null});if(erro){toast(traduzirErro(erro.message),"erro");return;}toast("PA entregue ao Armazém para confirmação.","sucesso");await carregarPassagensPaR31();});
+ document.getElementById("historicoEntregasPaR31").innerHTML=(passagens||[]).map(p=>`<p><strong>${escaparHtml(p.lotes_internos?.numero_lote||"—")}</strong> · ${p.quantidade} UN · ${escaparHtml(p.destino)} · ${escaparHtml(p.estado)}${p.quantidade_recebida!=null?` · recebido ${p.quantidade_recebida} UN`:""}</p>`).join("")||'<p class="texto-suave">Sem passagens.</p>';
+}
+
 const TITULOS_SECAO = {
     encomendas: "Encomendas", producao: "Produção diária", plano: "Plano de produção",
-    pedidos: "Pedidos ao armazém", movimentos: "Movimentos de stock", qualidade: "Qualidade",
+    passagens:"Entregar ao armazém", pedidos: "Pedidos ao armazém", movimentos: "Movimentos de stock", qualidade: "Qualidade",
 };
 
 function mudarSecao(secao) {
