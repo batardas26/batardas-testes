@@ -974,28 +974,24 @@ async function carregarLotesPaParaEmbalar(artigoId) {
         return;
     }
     const { data, error } = await supabaseClient
-        .from("lotes_internos")
-        .select("id, numero_lote, quantidade_disponivel")
+        .from("disponibilidade_pa_r313")
+        .select("lote_interno_id, numero_lote, quantidade_livre_un")
         .eq("artigo_id", artigoId)
-        .eq("tipo", "pa")
-        .eq("estado", "disponivel_embalamento")
-        .gt("quantidade_disponivel", 0)
+        .gt("quantidade_livre_un", 0)
         .order("produzido_em", { ascending: true });
     if (error) { console.error(error); return; }
 
     select.disabled = false;
     select.innerHTML = data.length
-        ? data.map((l) => `<option value="${l.id}">${escaparHtml(l.numero_lote)} (${l.quantidade_disponivel} UN disponíveis)</option>`).join("")
+        ? data.map((l) => `<option value="${l.lote_interno_id}">${escaparHtml(l.numero_lote)} (${l.quantidade_livre_un} UN livres)</option>`).join("")
         : `<option value="">Sem lotes com stock deste produto</option>`;
 }
 
 async function carregarPaCongeladoParaEmbalar() {
     const { data, error } = await supabaseClient
-        .from("lotes_internos")
-        .select("id, artigo_id, numero_lote, quantidade_disponivel, unidade_base, artigos(designacao), localizacoes(nome)")
-        .eq("tipo", "pa")
-        .eq("estado", "disponivel_embalamento")
-        .gt("quantidade_disponivel", 0)
+        .from("disponibilidade_pa_r313")
+        .select("lote_interno_id, artigo_id, artigo_designacao, numero_lote, quantidade_livre_un, quantidade_reservada_un, unidade_base, localizacao_nome")
+        .gt("quantidade_livre_un", 0)
         .order("produzido_em", { ascending: true });
     const corpo = document.getElementById("corpoPaInternoR3");
     if (error) {
@@ -1007,10 +1003,10 @@ async function carregarPaCongeladoParaEmbalar() {
     data.forEach((lote) => {
         const tr = document.createElement("tr");
         tr.innerHTML = `
-            <td data-rotulo="Artigo">${escaparHtml(lote.artigos?.designacao ?? "—")}</td>
+            <td data-rotulo="Artigo">${escaparHtml(lote.artigo_designacao ?? "—")}</td>
             <td data-rotulo="Lote" class="mono">${escaparHtml(lote.numero_lote)}</td>
-            <td data-rotulo="Remanescente">${lote.quantidade_disponivel} ${formatarUnidadeStock(lote.unidade_base)}</td>
-            <td data-rotulo="Armazém">${escaparHtml(lote.localizacoes?.nome ?? "—")}</td>
+            <td data-rotulo="Livre">${lote.quantidade_livre_un} ${formatarUnidadeStock(lote.unidade_base)}${Number(lote.quantidade_reservada_un)>0?`<small>${lote.quantidade_reservada_un} UN reservadas — não incluídas</small>`:""}</td>
+            <td data-rotulo="Armazém">${escaparHtml(lote.localizacao_nome ?? "—")}</td>
             <td data-rotulo="Acção"><button type="button">Selecionar para embalar</button></td>
         `;
         tr.querySelector("button").addEventListener("click", () => selecionarPaParaPlanoEmbalamento(lote));
@@ -1020,13 +1016,13 @@ async function carregarPaCongeladoParaEmbalar() {
 
 async function selecionarPaParaPlanoEmbalamento(lote) {
     document.getElementById("peArtigo").value = lote.artigo_id;
-    document.getElementById("peArtigoTexto").value = lote.artigos?.designacao ?? "";
+    document.getElementById("peArtigoTexto").value = lote.artigo_designacao ?? "";
     await carregarLotesPaParaEmbalar(lote.artigo_id);
-    document.getElementById("peLote").value = lote.id;
+    document.getElementById("peLote").value = lote.lote_interno_id;
     const quantidade = document.getElementById("peQuantidade");
     quantidade.value = "";
-    quantidade.max = lote.quantidade_disponivel;
-    quantidade.placeholder = `Máximo ${lote.quantidade_disponivel} UN`;
+    quantidade.max = lote.quantidade_livre_un;
+    quantidade.placeholder = `Máximo livre ${lote.quantidade_livre_un} UN`;
     document.getElementById("peUnidade").value = "un";
     document.getElementById("peData").closest(".cartao").scrollIntoView({ behavior: "smooth", block: "start" });
     quantidade.focus();
@@ -1087,17 +1083,17 @@ async function carregarPlanoEmbalamentoDoDia() {
 async function abrirConfirmacaoPlanoEmbalamento(item) {
     const artigoId=item.lotes_internos?.artigo_id;
     if(!artigoId){toast("Este plano não tem um lote interno de PA válido.","erro");return;}
-    const {data:lotes,error}=await supabaseClient
-        .from("lotes_comerciais")
-        .select("id,numero_lote,validade,unidade_stock")
-        .eq("artigo_id",artigoId)
-        .order("criado_em",{ascending:false});
+    const [{data:lotes,error},{data:formatos},{data:locais}]=await Promise.all([
+      supabaseClient.from("lotes_comerciais").select("id,numero_lote,validade,unidade_stock").eq("artigo_id",artigoId).order("criado_em",{ascending:false}),
+      supabaseClient.from("formatos_logisticos").select("id,nome,formato_logistico_itens!inner(artigo_id,quantidade_stock,material_embalagem)").eq("tipo","caixa").eq("ativo",true).eq("formato_logistico_itens.artigo_id",artigoId).eq("formato_logistico_itens.material_embalagem",false),
+      supabaseClient.from("localizacoes").select("localizacao_id,nome").order("nome")
+    ]);
     if(error){toast(traduzirErro(error.message),"erro");return;}
     const quantidade=item.quantidade_introduzida??item.quantidade;
     const unidade=item.unidade_introduzida??item.unidade_base??"un";
     const fator=Number(item.fator_aplicado||1);
     const fundo=document.createElement("div");fundo.className="modal-r31";
-    fundo.innerHTML=`<div class="cartao modal-r31-conteudo"><h2>Confirmar embalamento</h2><p><strong>${escaparHtml(item.lotes_internos?.artigos?.designacao??"—")}</strong></p><p class="texto-suave">Origem: lote interno <span class="mono">${escaparHtml(item.lotes_internos?.numero_lote??"—")}</span> · Planeado: ${quantidade} ${formatarUnidadeStock(unidade)} = ${item.quantidade} UN</p><div class="linha-form"><div><label>Quantidade boa embalada</label><input id="cpQuantidadeBoa" type="number" min="0" step="any" value="${quantidade}"></div><div><label>Unidade</label><input value="${formatarUnidadeStock(unidade)}" disabled></div></div><div class="linha-form"><div><label>Quebra no embalamento (UN)</label><input id="cpQuebraUn" type="number" min="0" step="any" value="0"></div><div><label>Motivo da quebra</label><input id="cpMotivoQuebra" placeholder="Obrigatório quando existe quebra"></div></div><label>Lote comercial mensal</label><select id="cpLoteComercial"><option value="">Seleciona o lote comercial (dispensado na quebra total)</option>${lotes.map(l=>`<option value="${l.id}">${escaparHtml(l.numero_lote)} · validade ${formatarData(l.validade)} · stock em ${formatarUnidadeStock(l.unidade_stock)}</option>`).join("")}</select><div id="cpResumo" class="texto-suave"></div><p class="texto-suave">Quantidade boa + quebra + remanescente = planeado. Só a quantidade boa entra no lote comercial; a quebra é consumida com motivo; o remanescente continua disponível para outro plano.</p><p id="cpErro" class="erro"></p><div class="linha-form"><button class="secundario" id="cpCancelar">Voltar</button><button id="cpConfirmar">Confirmar resultado</button></div></div>`;
+    fundo.innerHTML=`<div class="cartao modal-r31-conteudo"><h2>Confirmar embalamento</h2><p><strong>${escaparHtml(item.lotes_internos?.artigos?.designacao??"—")}</strong></p><p class="texto-suave">Origem: lote interno <span class="mono">${escaparHtml(item.lotes_internos?.numero_lote??"—")}</span> · Planeado: ${quantidade} ${formatarUnidadeStock(unidade)} = ${item.quantidade} UN</p><div class="linha-form"><div><label>Quantidade boa embalada</label><input id="cpQuantidadeBoa" type="number" min="0" step="any" value="${quantidade}"></div><div><label>Unidade</label><input value="${formatarUnidadeStock(unidade)}" disabled></div></div><div class="linha-form"><div><label>Quebra no embalamento (UN)</label><input id="cpQuebraUn" type="number" min="0" step="any" value="0"></div><div><label>Motivo da quebra</label><input id="cpMotivoQuebra" placeholder="Obrigatório quando existe quebra"></div></div><label>Lote comercial mensal</label><select id="cpLoteComercial"><option value="">Seleciona o lote comercial (dispensado na quebra total)</option>${lotes.map(l=>`<option value="${l.id}">${escaparHtml(l.numero_lote)} · validade ${formatarData(l.validade)} · stock em ${formatarUnidadeStock(l.unidade_stock)}</option>`).join("")}</select><h3>Caixas fechadas obtidas</h3><p class="texto-suave">Opcional quando ficam packs/unidades sem caixa. Criar caixas só organiza o stock comercial; nunca altera a quantidade.</p><div class="linha-form"><select id="cpFormatoCaixa"><option value="">Sem caixas fechadas</option>${(formatos||[]).map(f=>`<option value="${f.id}">${escaparHtml(f.nome)} · ${(f.formato_logistico_itens||[])[0]?.quantidade_stock??"—"} por caixa</option>`).join("")}</select><input id="cpNumeroCaixas" type="number" min="0" step="1" value="0" placeholder="Número de caixas"><select id="cpLocalCaixas"><option value="">Armazém por definir</option>${(locais||[]).map(l=>`<option value="${l.localizacao_id}">${escaparHtml(l.nome)}</option>`).join("")}</select></div><div id="cpResumo" class="texto-suave"></div><p class="texto-suave">Quantidade boa + quebra + remanescente = planeado. Só a quantidade boa entra no lote comercial; a quebra é consumida com motivo; o remanescente continua disponível para outro plano.</p><p id="cpErro" class="erro"></p><div class="linha-form"><button class="secundario" id="cpCancelar">Voltar</button><button id="cpConfirmar">Confirmar resultado</button></div></div>`;
     document.body.appendChild(fundo);
     const atualizarResumo=()=>{
         const boa=Number(fundo.querySelector("#cpQuantidadeBoa").value||0),quebra=Number(fundo.querySelector("#cpQuebraUn").value||0);
@@ -1115,15 +1111,19 @@ async function abrirConfirmacaoPlanoEmbalamento(item) {
         const quebra=Number(fundo.querySelector("#cpQuebraUn").value||0);
         const motivo=fundo.querySelector("#cpMotivoQuebra").value.trim();
         const loteComercial=fundo.querySelector("#cpLoteComercial").value||null;
+        const formatoCaixa=fundo.querySelector("#cpFormatoCaixa").value||null;
+        const numeroCaixas=Number(fundo.querySelector("#cpNumeroCaixas").value||0);
         const remanescente=Number(item.quantidade)-boa*fator-quebra;
         if(boa<0||quebra<0||remanescente<-.000001){fundo.querySelector("#cpErro").textContent="A quantidade boa e a quebra não podem ultrapassar o planeado.";return;}
         if(boa===0&&quebra===0){fundo.querySelector("#cpErro").textContent="Regista quantidade boa ou quebra; para não executar, cancela o plano.";return;}
         if(quebra>0&&!motivo){fundo.querySelector("#cpErro").textContent="Indica o motivo da quebra.";return;}
         if(boa>0&&!loteComercial){fundo.querySelector("#cpErro").textContent="Seleciona o lote comercial para a quantidade boa.";return;}
+        if((formatoCaixa&&!numeroCaixas)||(!formatoCaixa&&numeroCaixas)){fundo.querySelector("#cpErro").textContent="Para criar caixas, escolhe o formato e indica o número de caixas.";return;}
         const botao=fundo.querySelector("#cpConfirmar");botao.disabled=true;
-        const {error:erro}=await supabaseClient.rpc("concluir_plano_embalamento_r31",{
+        const {error:erro}=await supabaseClient.rpc("concluir_embalamento_com_caixas_r313",{
             p_plano:item.id,p_lote_comercial:loteComercial,p_quantidade_boa:boa,p_unidade_boa:unidade,
             p_quebra_un:quebra,p_motivo_quebra:motivo||null,p_confirmado_em:new Date().toISOString(),
+            p_formato_caixa:formatoCaixa,p_quantidade_caixas:numeroCaixas,p_localizacao_caixas:fundo.querySelector("#cpLocalCaixas").value||null,
         });
         if(erro){fundo.querySelector("#cpErro").textContent=traduzirErro(erro.message);botao.disabled=false;return;}
         fundo.remove();

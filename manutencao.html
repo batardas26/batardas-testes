@@ -54,7 +54,7 @@
     <div class="cartao">
         <h2>Reportar avaria ou pedido de obra</h2>
         <p style="font-size:13px; color:var(--ink-suave); margin-top:-8px;">
-            Qualquer pessoa pode reportar — só quem estiver na Manutenção é que assume/fecha.
+            Apenas responsáveis de equipa podem pedir manutenção; a equipa de Manutenção assume e fecha os pedidos.
         </p>
         <div class="linha-form">
             <select id="pmEquipamento"><option value="">Equipamento (opcional)</option></select>
@@ -156,7 +156,8 @@ async function iniciar() {
     await carregarPreventiva();
     carregarMinhasNcPartilhado(contexto.session.user.id);
 
-    // Só quem tem a etiqueta "manutencao" (ou é admin) vê os botões de
+    // Só a equipa de manutenção gere pedidos; pedir manutenção é reservado
+    // aos responsáveis de equipa através do botão transversal.
     // assumir/fechar — os outros com acesso ao ecrã só veem o estado.
     window._podeGerirManutencao = contexto.perfil.role === "admin" || contexto.perfil.etiquetas?.includes("manutencao");
 }
