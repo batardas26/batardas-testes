@@ -102,7 +102,7 @@
         </div>
         <button id="btnAdicionarPlano">Adicionar ao plano</button>
         <table style="margin-top:16px;">
-            <thead><tr><th>Produto</th><th>Quantidade</th><th>PA — lote atribuído</th><th></th></tr></thead>
+            <thead><tr><th>Produto</th><th>Quantidade</th><th>BOM da execução</th><th></th></tr></thead>
             <tbody id="corpoPlanoProducao"></tbody>
         </table>
     </div>
@@ -580,7 +580,7 @@ async function carregarProducaoDiaria() {
 
     const { data, error } = await supabaseClient
         .from("plano_producao")
-        .select("id, quantidade, data_planeada, lote_atribuido_id, linha_encomenda_id, necessidade_linha_id, lote_interno_atribuido_id, estado_r31, quantidade_boa_un, quebra_un, motivo_quebra, artigos(artigo_id, designacao, tipo_produto, unidade_stock), lotes_producao(numero_lote, quantidade_produzida), lotes_internos(numero_lote,quantidade_disponivel)")
+        .select("id, quantidade, data_planeada, lote_atribuido_id, linha_encomenda_id, necessidade_linha_id, lote_interno_atribuido_id, estado_r31, quantidade_boa_un, quebra_un, motivo_quebra, bom_versao_id_r32, bom_snapshot_r32, artigos(artigo_id, designacao, tipo_produto, unidade_stock), lotes_producao(numero_lote, quantidade_produzida), lotes_internos(numero_lote,quantidade_disponivel)")
         .eq("data_planeada", dataPlano)
         .order("criado_em", { ascending: true });
     if (error) { erroEl.textContent = traduzirErro(error.message); return; }
@@ -598,16 +598,18 @@ async function carregarProducaoDiaria() {
                 ? `Concluída: <strong>${item.quantidade_boa_un||0} UN boas</strong>${Number(item.quebra_un)>0?` · ${item.quebra_un} UN de quebra (${escaparHtml(item.motivo_quebra||"—")})`:""}`
                 : item.estado_r31==="planeado"
                   ? `<button class="pd-iniciar-pa">Iniciar produção</button>`
+                  : item.estado_r31==="em_producao"
+                    ? `<button class="pd-afetar-pa">Concluir produção</button>`
                   : item.lote_interno_atribuido_id
                 ? `PA congelado afetado: <strong>${escaparHtml(item.lotes_internos?.numero_lote ?? "—")}</strong>`
-                : item.linha_encomenda_id
-                  ? `<button class="pd-afetar-pa">Concluir produção</button>`
-                  : item.lote_atribuido_id
+                : item.lote_atribuido_id
                     ? `Lote legado atribuído: <strong>${escaparHtml(item.lotes_producao?.numero_lote ?? "—")}</strong>`
                     : `<span style="color:var(--perigo);">Plano sem lote interno associado.</span>`;
+            const bomR32=item.bom_snapshot_r32?.componentes||[];
             div.innerHTML = `
                 <strong>${escaparHtml(item.artigos?.designacao ?? "—")}</strong>
                 <span style="font-size:12px; color:var(--ink-suave);"> · Produto acabado · ${formatarData(item.data_planeada)} · Previsto: ${item.quantidade} UN</span>
+                <details style="margin-top:8px" ${bomR32.length?'':'hidden'}><summary>BOM prevista desta produção</summary><ul>${bomR32.map(x=>`<li>${escaparHtml(x.componente)} · ${x.quantidade} ${formatarUnidadeStock(x.unidade)}</li>`).join("")}</ul></details>
                 <p style="font-size:13px; margin:6px 0 0;">${estadoTexto}</p>
             `;
         } else {
@@ -629,8 +631,8 @@ async function carregarProducaoDiaria() {
             `;
         }
 
-        if(ehPa&&item.linha_encomenda_id&&item.estado_r31==="planeado"){div.querySelector(".pd-iniciar-pa")?.addEventListener("click",async()=>{const {error}=await supabaseClient.rpc("iniciar_plano_producao_r312",{p_plano:item.id});if(error){toast(traduzirErro(error.message),"erro");return;}toast("Produção iniciada.","sucesso");await carregarProducaoDiaria();await carregarNecessidadesEncomendasR31();});}
-        if(ehPa&&item.linha_encomenda_id&&item.estado_r31==="em_producao"){div.querySelector(".pd-afetar-pa")?.addEventListener("click",()=>abrirAfetacaoPaProduzido(item));}
+        if(ehPa&&item.estado_r31==="planeado"){div.querySelector(".pd-iniciar-pa")?.addEventListener("click",async()=>{const {error}=await supabaseClient.rpc("iniciar_plano_producao_r312",{p_plano:item.id});if(error){toast(traduzirErro(error.message),"erro");return;}toast("Produção iniciada.","sucesso");await carregarProducaoDiaria();await carregarNecessidadesEncomendasR31();});}
+        if(ehPa&&item.estado_r31==="em_producao"){div.querySelector(".pd-afetar-pa")?.addEventListener("click",()=>abrirAfetacaoPaProduzido(item));}
 
         if (!ehPa && !item.lote_atribuido_id) {
             div.querySelector(".pd-unidade").value = item.artigos?.unidade_stock ?? "kg";
@@ -647,18 +649,20 @@ async function carregarProducaoDiaria() {
 }
 
 async function abrirAfetacaoPaProduzido(item){
-    const [{data:intermedios,error},{data:locais}]=await Promise.all([
-      supabaseClient.from("lotes_internos").select("id,numero_lote,quantidade_disponivel,unidade_base,artigos(designacao)").eq("tipo","intermedio").gt("quantidade_disponivel",0).order("produzido_em"),
+    const [{data:intermedios,error},{data:fornecedor},{data:locais}]=await Promise.all([
+      supabaseClient.from("lotes_internos").select("id,artigo_id,numero_lote,quantidade_disponivel,unidade_base,artigos(designacao)").eq("tipo","intermedio").gt("quantidade_disponivel",0).order("produzido_em"),
+      supabaseClient.from("lotes_artigo").select("lote_artigo_id,artigo_id,numero_lote,quantidade_atual,validade,artigos(designacao,unidade_stock)").eq("estado_qualidade","disponivel").gt("quantidade_atual",0).order("validade"),
       supabaseClient.from("localizacoes").select("localizacao_id,nome").order("nome")
     ]);
     if(error){toast(traduzirErro(error.message),"erro");return;}
     const fundo=document.createElement("div");fundo.className="modal-r31";
-    fundo.innerHTML=`<div class="cartao modal-r31-conteudo"><h2>Concluir produção e criar lote interno</h2><p>${escaparHtml(item.artigos?.designacao||"—")} · planeado ${item.quantidade} UN para ${formatarData(item.data_planeada)}</p><p class="texto-suave">A aplicação cria um lote novo de PA já congelado. Não escolhas um lote antigo.</p><div class="linha-form"><div><label>Quantidade boa obtida (UN)</label><input id="apQuantidade" type="number" min="0" step="any" value="${item.quantidade}"></div><div><label>Quebra (UN)</label><input id="apQuebra" type="number" min="0" step="any" value="0"></div></div><label>Motivo da quebra</label><input id="apMotivo" type="text" placeholder="Obrigatório quando existe quebra"><div class="linha-form"><select id="apLocal"><option value="">Armazém por definir</option>${(locais||[]).map(l=>`<option value="${l.localizacao_id}">${escaparHtml(l.nome)}</option>`).join("")}</select><input id="apValidade" type="date" aria-label="Validade interna"></div><h3>Intermédios realmente consumidos</h3><p class="texto-suave">Regista apenas os lotes e quantidades efetivamente usados; o saldo não consumido permanece disponível.</p><div id="apOrigens">${(intermedios||[]).map(l=>`<div class="linha-form origem-producao-r313"><label><input type="checkbox" data-origem-id="${l.id}"> ${escaparHtml(l.artigos?.designacao||"—")} · <span class="mono">${escaparHtml(l.numero_lote)}</span> · disponível ${l.quantidade_disponivel} ${formatarUnidadeStock(l.unidade_base)}</label><input type="number" min="0" max="${l.quantidade_disponivel}" step="any" data-origem-q="${l.id}" placeholder="Quantidade consumida" disabled></div>`).join("")||'<p class="texto-suave">Sem lotes intermédios disponíveis.</p>'}</div><p class="texto-suave">A diferença entre planeado, bom e quebra fica como “não produzida” e continua necessária para a encomenda.</p><p id="apErro" class="erro"></p><div class="linha-form"><button id="apCancelar" class="secundario">Voltar</button><button id="apConfirmar">Confirmar resultado real</button></div></div>`;
+    const origens=[...(intermedios||[]).map(l=>({id:l.id,artigo:l.artigo_id,nome:l.artigos?.designacao,lote:l.numero_lote,q:l.quantidade_disponivel,u:l.unidade_base,origem:"interno"})),...(fornecedor||[]).map(l=>({id:l.lote_artigo_id,artigo:l.artigo_id,nome:l.artigos?.designacao,lote:l.numero_lote,q:l.quantidade_atual,u:l.artigos?.unidade_stock,origem:"fornecedor"}))];
+    fundo.innerHTML=`<div class="cartao modal-r31-conteudo"><h2>Concluir produção e criar lote interno</h2><p>${escaparHtml(item.artigos?.designacao||"—")} · planeado ${item.quantidade} UN para ${formatarData(item.data_planeada)}</p><p class="texto-suave">A aplicação cria um lote novo de PA já congelado. Não escolhas um lote antigo.</p><div class="linha-form"><div><label>Quantidade boa obtida (UN)</label><input id="apQuantidade" type="number" min="0" step="any" value="${item.quantidade}"></div><div><label>Quebra (UN)</label><input id="apQuebra" type="number" min="0" step="any" value="0"></div></div><label>Motivo da quebra</label><input id="apMotivo" type="text" placeholder="Obrigatório quando existe quebra"><label>Motivo da diferença entre planeado e realizado</label><input id="apMotivoDiferenca" type="text" placeholder="Obrigatório se o resultado não coincidir com o planeado"><div class="linha-form"><select id="apLocal"><option value="">Armazém por definir</option>${(locais||[]).map(l=>`<option value="${l.localizacao_id}">${escaparHtml(l.nome)}</option>`).join("")}</select><input id="apValidade" type="date" aria-label="Validade interna"></div><h3>Consumos realmente utilizados</h3><p class="texto-suave">Seleciona MP de fornecedor e intermédios. O saldo não consumido permanece disponível.</p><div id="apOrigens">${origens.map(l=>`<div class="linha-form origem-producao-r313"><label><input type="checkbox" data-origem-id="${l.id}" data-origem-artigo="${l.artigo}" data-origem-tipo="${l.origem}" data-origem-unidade="${l.u}"> ${escaparHtml(l.nome||"—")} · <span class="mono">${escaparHtml(l.lote)}</span> · disponível ${l.q} ${formatarUnidadeStock(l.u)}</label><input type="number" min="0" max="${l.q}" step="any" data-origem-q="${l.id}" placeholder="Quantidade consumida" disabled></div>`).join("")||'<p class="texto-suave">Sem lotes disponíveis.</p>'}</div><p class="texto-suave">A diferença entre planeado, bom e quebra fica como “não produzida” e continua necessária para a encomenda.</p><p id="apErro" class="erro"></p><div class="linha-form"><button id="apCancelar" class="secundario">Voltar</button><button id="apConfirmar">Confirmar resultado real</button></div></div>`;
     fundo.querySelector("#apErro").insertAdjacentHTML("beforebegin",'<p class="texto-suave">Numa perda total, coloca 0 UN boas e regista toda a quantidade como quebra; não será criado stock.</p>');
     document.body.appendChild(fundo);
     fundo.querySelectorAll("[data-origem-id]").forEach(c=>c.onchange=()=>{fundo.querySelector(`[data-origem-q="${c.dataset.origemId}"]`).disabled=!c.checked;});
     fundo.querySelector("#apCancelar").onclick=()=>fundo.remove();
-    fundo.querySelector("#apConfirmar").onclick=async()=>{const q=Number(fundo.querySelector("#apQuantidade").value)||0,quebra=Number(fundo.querySelector("#apQuebra").value)||0,motivo=fundo.querySelector("#apMotivo").value.trim();const origens=[...fundo.querySelectorAll("[data-origem-id]:checked")].map(c=>({lote_id:c.dataset.origemId,quantidade:Number(fundo.querySelector(`[data-origem-q="${c.dataset.origemId}"]`).value)}));if(origens.some(o=>!o.quantidade)){fundo.querySelector("#apErro").textContent="Indica a quantidade de cada intermédio selecionado.";return;}const botao=fundo.querySelector("#apConfirmar");botao.disabled=true;const {data:novoLote,error:erro}=await supabaseClient.rpc("concluir_plano_producao_r313",{p_plano:item.id,p_quantidade_boa_un:q,p_quebra_un:quebra,p_motivo_quebra:motivo||null,p_origens_internas:origens,p_localizacao:fundo.querySelector("#apLocal").value||null,p_validade:fundo.querySelector("#apValidade").value||null});if(erro){fundo.querySelector("#apErro").textContent=traduzirErro(erro.message);botao.disabled=false;return;}fundo.remove();toast(q>0?`Produção concluída e novo lote interno ${novoLote} criado.`:"Perda total registada sem criar stock fictício.","sucesso");await carregarProducaoDiaria();await carregarNecessidadesEncomendasR31();};
+    fundo.querySelector("#apConfirmar").onclick=async()=>{const q=Number(fundo.querySelector("#apQuantidade").value)||0,quebra=Number(fundo.querySelector("#apQuebra").value)||0,motivo=fundo.querySelector("#apMotivo").value.trim(),motivoDiferenca=fundo.querySelector("#apMotivoDiferenca").value.trim();const consumos=[...fundo.querySelectorAll("[data-origem-id]:checked")].map(c=>({lote_id:c.dataset.origemId,componente_id:c.dataset.origemArtigo,componente_previsto_id:c.dataset.origemArtigo,origem:c.dataset.origemTipo,unidade:c.dataset.origemUnidade,quantidade:Number(fundo.querySelector(`[data-origem-q="${c.dataset.origemId}"]`).value),substituicao:false}));if(consumos.some(o=>!o.quantidade)){fundo.querySelector("#apErro").textContent="Indica a quantidade de cada lote selecionado.";return;}const botao=fundo.querySelector("#apConfirmar");botao.disabled=true;const {data:novoLote,error:erro}=await supabaseClient.rpc("concluir_producao_r32",{p_plano:item.id,p_quantidade_boa_un:q,p_quebra_un:quebra,p_motivo_quebra:motivo||null,p_consumos:consumos,p_localizacao:fundo.querySelector("#apLocal").value||null,p_validade:fundo.querySelector("#apValidade").value||null,p_motivo_diferenca:motivoDiferenca||null});if(erro){fundo.querySelector("#apErro").textContent=traduzirErro(erro.message);botao.disabled=false;return;}fundo.remove();toast(q>0?`Produção concluída e novo lote interno ${novoLote} criado.`:"Perda total registada sem criar stock fictício.","sucesso");await carregarProducaoDiaria();await carregarNecessidadesEncomendasR31();};
 }
 
 async function registarProducaoIntermedio(item, div) {
@@ -712,7 +716,7 @@ async function carregarPlanoDoDia() {
     const dataPlano = document.getElementById("ppData").value;
     const { data, error } = await supabaseClient
         .from("plano_producao")
-        .select("id, artigo_id, quantidade, quantidade_introduzida, unidade_introduzida, unidade_base, lote_atribuido_id, artigos(designacao, tipo_produto)")
+        .select("id, artigo_id, quantidade, quantidade_introduzida, unidade_introduzida, unidade_base, lote_atribuido_id, bom_versao_id_r32, bom_snapshot_r32, artigos(designacao, tipo_produto)")
         .eq("data_planeada", dataPlano)
         .order("criado_em", { ascending: true });
     if (error) { console.error(error); return; }
@@ -725,29 +729,14 @@ async function carregarPlanoDoDia() {
     for (const l of data) {
         const tr = document.createElement("tr");
         const ehPa = l.artigos?.tipo_produto === "pa";
-        let celulaAtribuicao = "—";
-        if (ehPa) {
-            const { data: lotesDisponiveis } = await supabaseClient
-                .from("lotes_producao")
-                .select("lote_id, numero_lote, quantidade_produzida")
-                .eq("artigo_id", l.artigo_id)
-                .gt("quantidade_produzida", 0)
-                .order("data_producao", { ascending: true });
-            const opcoes = (lotesDisponiveis ?? []).map((lp) =>
-                `<option value="${lp.lote_id}" ${lp.lote_id === l.lote_atribuido_id ? "selected" : ""}>${escaparHtml(lp.numero_lote)} (${lp.quantidade_produzida})</option>`
-            ).join("");
-            celulaAtribuicao = `<select data-plano-id="${l.id}" class="atribuir-lote-pa" style="width:auto;"><option value="">— sem lote atribuído —</option>${opcoes}</select>`;
-        }
+        const componentes=l.bom_snapshot_r32?.componentes||[];
+        const celulaAtribuicao=l.bom_versao_id_r32?`<strong>BOM confirmada</strong><small>${componentes.length} componentes · fotografia preservada</small>`:`<span style="color:var(--perigo)">BOM por configurar</span>`;
         tr.innerHTML = `
             <td data-rotulo="Produto">${escaparHtml(l.artigos?.designacao ?? "—")}</td>
             <td data-rotulo="Quantidade">${l.quantidade_introduzida ?? l.quantidade} ${formatarUnidadeStock(l.unidade_introduzida ?? l.unidade_base)}${l.quantidade_introduzida && Number(l.quantidade_introduzida)!==Number(l.quantidade) ? ` → ${l.quantidade} ${formatarUnidadeStock(l.unidade_base)}` : ""}</td>
-            <td data-rotulo="PA — lote atribuído">${celulaAtribuicao}</td>
+            <td data-rotulo="BOM da execução">${celulaAtribuicao}</td>
             <td data-rotulo=""><button class="secundario" data-id="${l.id}" style="padding:4px 10px; font-size:12px;">Remover</button></td>
         `;
-        const selectAtribuicao = tr.querySelector(".atribuir-lote-pa");
-        if (selectAtribuicao) {
-            selectAtribuicao.addEventListener("change", (e) => atribuirLotePa(l.id, e.target.value || null));
-        }
         tr.querySelector("button").addEventListener("click", () => removerDoPlano(l.id));
         corpo.appendChild(tr);
     }
@@ -776,9 +765,9 @@ document.getElementById("btnAdicionarPlano").addEventListener("click", async () 
     const dataPlano = document.getElementById("ppData").value;
     if (!artigoId || !quantidade || !dataPlano) return;
 
-    const { error } = await supabaseClient
-        .from("plano_producao")
-        .insert({ artigo_id: artigoId, quantidade, quantidade_introduzida: quantidade, unidade_introduzida: unidade, data_planeada: dataPlano });
+    const { error } = await supabaseClient.rpc("planear_producao_r32",{
+        p_artigo:artigoId,p_quantidade:quantidade,p_unidade:unidade,p_data:dataPlano,p_linha_encomenda:null,p_observacoes:null,
+    });
     if (error) { toast("Erro ao adicionar: " + traduzirErro(error.message), "erro"); return; }
 
     document.getElementById("ppQuantidade").value = "";

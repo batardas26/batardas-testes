@@ -8,7 +8,7 @@
 <link rel="icon" href="img/logo.png" type="image/png"><link rel="stylesheet" href="css/style.css">
 </head>
 <body class="pagina-inicio">
-<aside class="ambiente-testes">BATARDAS · TESTES — R3.1.1</aside>
+<aside class="ambiente-testes">BATARDAS · TESTES — R3.2</aside>
 <header class="inicio-topo">
     <div class="inicio-marca"><img src="img/logo.png" alt="Batardas"><strong>Centro operacional</strong></div>
     <div><span class="utilizador" id="nomeUtilizador"></span><button class="secundario" onclick="terminarSessao()">Sair</button></div>
@@ -16,7 +16,7 @@
 <main class="inicio-conteudo">
     <section class="inicio-boas-vindas">
         <div><p class="inicio-data" id="dataHoje"></p><h1 id="saudacao">Bom trabalho.</h1><p>Regista o plano no início, as exceções quando acontecem e confirma os valores reais no fim do turno.</p></div>
-        <span class="badge-r3">R3.1.1 · TESTES</span>
+        <span class="badge-r3">R3.2 · TESTES</span>
     </section>
 
     <section class="inicio-grelha-resumo" aria-label="Resumo operacional">
@@ -52,6 +52,7 @@ const MODULOS = [
     { roles:["qualidade","admin"], nome:"Qualidade", href:"qualidade.html", icon:"clipboard-check" },
     { roles:["manutencao","admin"], nome:"Manutenção", href:"manutencao.html", icon:"tool" },
     { roles:["admin","producao","armazem","qualidade"], nome:"Artigos, lotes e validade", href:"modelo-artigos-lotes.html", icon:"route" },
+    { roles:["admin"], nome:"Configuração R3.2", href:"configuracao-r32.html", icon:"adjustments" },
 ];
 
 async function iniciarHomepage() {

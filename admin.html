@@ -31,6 +31,7 @@
     <button class="nav-item" data-secao="importar" id="navImportar" style="display:none;"><i class="ti ti-upload" aria-hidden="true"></i> Importações</button>
     <button class="nav-item" data-secao="qualidade"><i class="ti ti-clipboard-check" aria-hidden="true"></i> Qualidade</button>
     <a class="nav-item" href="modelo-artigos-lotes.html" style="text-decoration:none;"><i class="ti ti-arrows-transfer-up" aria-hidden="true"></i> Artigos, lotes &amp; validades</a>
+    <a class="nav-item" href="configuracao-r32.html" style="text-decoration:none;"><i class="ti ti-adjustments" aria-hidden="true"></i> Configuração R3.2</a>
 
     <div class="rodape-lateral">
         <p style="font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-fraca); margin:12px 0 8px;">Ver como</p>
@@ -68,10 +69,16 @@
                 <div id="fClienteResultados" class="lista-sugestoes" style="display:none;"></div>
             </div>
             <select id="fCanal">
-                <option value="Telefone">Telefone</option>
-                <option value="Email">Email</option>
-                <option value="Presencial">Presencial</option>
+                <option value="telefone">Telefone</option>
+                <option value="email">Email</option>
+                <option value="presencial">Presencial</option>
+                <option value="online">Loja online</option>
             </select>
+        </div>
+        <div class="linha-form">
+            <input id="fReferenciaExterna" placeholder="N.º encomenda externa/online (obrigatório online)">
+            <input id="fNomeDestinatario" placeholder="Nome do destinatário/recolha">
+            <select id="fTipoEntrega"><option value="expedicao">Expedição</option><option value="recolha_loja">Recolha em Loja</option></select>
         </div>
         <div class="linha-form">
             <div class="campo-pesquisa-artigo">
@@ -94,6 +101,8 @@
         </div>
         <div class="linha-form">
             <input id="fQuantidade" type="number" min="1" placeholder="Quantidade">
+            <select id="fFormatoCliente"><option value="">Sem formato de caixa específico</option></select>
+            <input id="fQuantidadeCaixas" type="number" min="1" step="1" placeholder="N.º caixas completas" disabled>
             <button id="btnAdicionarLinhaEncomenda" type="button" class="secundario">Adicionar linha</button>
         </div>
         <div id="linhasNovaEncomenda" style="margin:12px 0;"><p class="texto-suave">Ainda não adicionaste artigos.</p></div>
@@ -922,7 +931,7 @@ function obterSemanaAtual() {
 
 async function activarPesquisasDeArtigo() {
     await activarPesquisaArtigo("fProdutoTexto", "fProduto", "fProdutoResultados");
-    await activarPesquisaCliente("fClienteTexto", "fCliente", "fClienteResultados");
+    await activarPesquisaCliente("fClienteTexto", "fCliente", "fClienteResultados", carregarFormatosClienteR32);
     await activarPesquisaArtigo("pExtraArtigoTexto", "pExtraArtigo", "pExtraArtigoResultados");
     await activarPesquisaArtigo("rpArtigoTexto", "rpArtigo", "rpArtigoResultados");
     await activarPesquisaArtigo("lcArtigoTexto", "lcArtigo", "lcArtigoResultados");
@@ -1683,7 +1692,7 @@ let linhasNovaEncomenda=[];
 function renderizarLinhasNovaEncomenda(){
     const alvo=document.getElementById("linhasNovaEncomenda");
     if(!linhasNovaEncomenda.length){alvo.innerHTML='<p class="texto-suave">Ainda não adicionaste artigos.</p>';return;}
-    alvo.innerHTML=`<table><thead><tr><th>Artigo</th><th>Quantidade</th><th></th></tr></thead><tbody>${linhasNovaEncomenda.map((l,i)=>`<tr><td>${escaparHtml(l.designacao)}</td><td>${l.quantidade} ${formatarUnidadeStock(l.unidade)}</td><td><button type="button" class="secundario" data-remover-linha="${i}">Remover</button></td></tr>`).join("")}</tbody></table>`;
+    alvo.innerHTML=`<table><thead><tr><th>Artigo</th><th>Quantidade</th><th>Formato</th><th></th></tr></thead><tbody>${linhasNovaEncomenda.map((l,i)=>`<tr><td>${escaparHtml(l.designacao)}</td><td>${l.quantidade} ${formatarUnidadeStock(l.unidade)}</td><td>${l.formato_nome?`${escaparHtml(l.formato_nome)} · ${l.quantidade_caixas} caixas completas`:"—"}</td><td><button type="button" class="secundario" data-remover-linha="${i}">Remover</button></td></tr>`).join("")}</tbody></table>`;
     alvo.querySelectorAll("[data-remover-linha]").forEach(b=>b.onclick=()=>{linhasNovaEncomenda.splice(Number(b.dataset.removerLinha),1);renderizarLinhasNovaEncomenda();});
 }
 
@@ -1692,10 +1701,13 @@ document.getElementById("btnAdicionarLinhaEncomenda").addEventListener("click",a
     const artigo=artigoId?await obterArtigoPorId(artigoId):null;
     const quantidade=Number(document.getElementById("fQuantidade").value);
     const unidade=document.getElementById("fUnidade").value;
+    const formato=document.getElementById("fFormatoCliente"),formatoId=formato.value||null;
+    const quantidadeCaixas=formatoId?Number(document.getElementById("fQuantidadeCaixas").value):null;
     if(!artigoId||!artigo||quantidade<=0){document.getElementById("erroRegisto").textContent="Escolhe o artigo e indica uma quantidade válida.";return;}
-    const existente=linhasNovaEncomenda.find(l=>l.artigo_id===artigoId&&l.unidade===unidade);
-    if(existente)existente.quantidade+=quantidade;
-    else linhasNovaEncomenda.push({artigo_id:artigoId,designacao:artigo.designacao,quantidade,unidade});
+    if(formatoId&&!(quantidadeCaixas>0)){document.getElementById("erroRegisto").textContent="Indica o número de caixas completas deste formato.";return;}
+    const existente=linhasNovaEncomenda.find(l=>l.artigo_id===artigoId&&l.unidade===unidade&&l.formato_id===formatoId);
+    if(existente){existente.quantidade+=quantidade;if(formatoId)existente.quantidade_caixas+=quantidadeCaixas;}
+    else linhasNovaEncomenda.push({artigo_id:artigoId,designacao:artigo.designacao,quantidade,unidade,formato_id:formatoId,formato_nome:formato.selectedOptions[0]?.textContent,quantidade_caixas:quantidadeCaixas});
     document.getElementById("fProdutoTexto").value="";document.getElementById("fProduto").value="";document.getElementById("fQuantidade").value="";
     document.getElementById("erroRegisto").textContent="";renderizarLinhasNovaEncomenda();
 });
@@ -1731,9 +1743,11 @@ document.getElementById("btnRegistar").addEventListener("click", async () => {
         }
     }
 
-    const {data:novaEncomenda,error:erroEncomenda}=await supabaseClient.rpc("criar_encomenda_multilinha_r31",{
-        p_cliente:clienteId,p_canal:canal,p_data_entrega:dataEntrega,
-        p_linhas:linhasNovaEncomenda.map(l=>({artigo_id:l.artigo_id,quantidade:l.quantidade,unidade:l.unidade})),
+    const {data:novaEncomenda,error:erroEncomenda}=await supabaseClient.rpc("criar_encomenda_r32",{
+        p_cliente:clienteId,p_canal:canal,p_referencia_externa:document.getElementById("fReferenciaExterna").value||null,
+        p_nome_destinatario:document.getElementById("fNomeDestinatario").value||null,p_data_entrega:dataEntrega,
+        p_tipo_entrega:document.getElementById("fTipoEntrega").value,
+        p_linhas:linhasNovaEncomenda.map(l=>({artigo_id:l.artigo_id,quantidade:l.quantidade,unidade:l.unidade,formato_id:l.formato_id,quantidade_caixas:l.quantidade_caixas})),
         p_observacoes:document.getElementById("fObservacoesEncomenda").value||null,
     });
     if(erroEncomenda){erroEl.textContent="A encomenda não foi criada: "+traduzirErro(erroEncomenda.message);return;}
@@ -1744,11 +1758,17 @@ document.getElementById("btnRegistar").addEventListener("click", async () => {
     document.getElementById("fProdutoTexto").value = "";
     document.getElementById("fProduto").value = "";
     document.getElementById("fObservacoesEncomenda").value = "";
+    document.getElementById("fReferenciaExterna").value = "";document.getElementById("fNomeDestinatario").value = "";
     linhasNovaEncomenda=[];renderizarLinhasNovaEncomenda();
     carregar();
     carregarPlaneamentoSemanal();
     toast(`Encomenda registada com afetação automática de stock por etapa.`, "sucesso");
 });
+
+document.getElementById("fCanal").addEventListener("change",e=>{if(e.target.value==="online"){document.getElementById("fTipoEntrega").value="recolha_loja";document.getElementById("fUnidade").value="pack";}});
+document.getElementById("fFormatoCliente").addEventListener("change",e=>{document.getElementById("fQuantidadeCaixas").disabled=!e.target.value;});
+async function carregarFormatosClienteR32(){const cliente=document.getElementById("fCliente").value,seletor=document.getElementById("fFormatoCliente");seletor.innerHTML='<option value="">Sem formato de caixa específico</option>';if(!cliente)return;const {data}=await supabaseClient.from("formatos_cliente_r32").select("formato_id,recomendado,formatos_logisticos(nome)").eq("cliente_id",cliente).eq("ativo",true);seletor.innerHTML+=(data||[]).map(x=>`<option value="${x.formato_id}" ${x.recomendado?"selected":""}>${escaparHtml(x.formatos_logisticos?.nome||"Formato de caixa")}${x.recomendado?" · recomendado":""}</option>`).join("");document.getElementById("fQuantidadeCaixas").disabled=!seletor.value;}
+document.getElementById("fClienteTexto").addEventListener("change",()=>setTimeout(carregarFormatosClienteR32,0));
 
 // --- PDF semanal --------------------------------------------------------
 // Gera um calendário Seg–Dom com as encomendas previstas para entrega essa
