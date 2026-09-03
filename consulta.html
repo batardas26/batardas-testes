@@ -206,7 +206,7 @@
 let todasEncomendas = [];
 
 async function iniciar() {
-    const contexto = await exigirRole(["consulta", "admin", "producao", "armazem"]);
+    const contexto = await exigirRole(["consulta", "admin"]);
     if (!contexto) return;
     renderizarCabecalhoUtilizador(contexto.perfil, contexto.session.user.id);
     renderizarAcessosExtra(contexto.perfil);

@@ -139,7 +139,7 @@
         </p>
         <input id="laFiltro" placeholder="Pesquisar por código ou nome..." style="font-size:16px; padding:14px 16px; margin-bottom:16px;">
         <table>
-            <thead><tr><th>Referência</th><th>Designação</th><th>Tipo</th><th>Unidade</th><th>Stock por etapa</th></tr></thead>
+            <thead><tr><th>Referência</th><th>Designação</th><th>Tipo</th><th>Unidade</th><th>Stock livre por etapa</th></tr></thead>
             <tbody id="corpoListaArtigos"></tbody>
         </table>
     </div>
@@ -236,19 +236,11 @@
     </div>
 
     <div class="cartao">
-        <h2>Atribuir lote comercial a encomenda</h2>
+        <h2>Reserva automática de encomendas</h2>
         <p style="font-size:13px; color:var(--ink-suave); margin-top:-8px;">
-            Consome logo a quantidade do lote — evita duas encomendas disputarem o mesmo stock sem ninguém dar por isso.
+            Ao registar uma encomenda, o sistema reserva automaticamente o stock válido pela validade mais próxima. O que faltar segue para embalamento ou produção; não é necessária uma atribuição manual paralela.
         </p>
-        <div class="linha-form">
-            <select id="aLote"></select>
-            <select id="aEncomenda"></select>
-        </div>
-        <div class="linha-form">
-            <input id="aQuantidade" type="number" min="0.01" step="0.01" placeholder="Quantidade atribuída">
-            <button id="btnAtribuir">Atribuir</button>
-        </div>
-        <p id="erroAtribuicao" class="erro"></p>
+        <p class="sucesso">Uma única regra de reserva: físico − reservado = livre.</p>
     </div>
 
     <div class="cartao">
@@ -883,7 +875,6 @@ async function iniciar() {
     await carregarMovimentosStock();
     await carregarLotesArtigoAdmin();
     await atualizarBadgeAlertas();
-    await carregarEncomendasParaAtribuicao();
     await carregarLotes();
     await carregarListaArtigos();
     await activarPesquisasDeArtigo();
@@ -1137,35 +1128,7 @@ document.getElementById("btnProducaoExtra").addEventListener("click", async () =
     carregarPlaneamentoSemanal();
 });
 
-async function carregarEncomendasParaAtribuicao() {
-    const { data, error } = await supabaseClient
-        .from("encomendas")
-        .select("encomenda_id, clientes(nome)")
-        .in("estado", ["Registada", "Em Produção"])
-        .order("data_entrega_pretendida");
-    if (error) { console.error(error); return; }
-
-    document.getElementById("aEncomenda").innerHTML = data.length
-        ? data.map((e) => `<option value="${e.encomenda_id}">${escaparHtml(e.clientes?.nome ?? "—")}</option>`).join("")
-        : `<option value="">Sem encomendas em aberto</option>`;
-}
-
-async function carregarLotesParaAtribuicao() {
-    const { data, error } = await supabaseClient
-        .from("lotes_comerciais")
-        .select("id, numero_lote, quantidade_disponivel, artigos(designacao)")
-        .gt("quantidade_disponivel", 0)
-        .order("criado_em", { ascending: false });
-    if (error) { console.error(error); return; }
-
-    document.getElementById("aLote").innerHTML = data.length
-        ? data.map((l) => `<option value="${l.id}">${escaparHtml(l.artigos?.designacao ?? "—")} — lote ${escaparHtml(l.numero_lote)} (${l.quantidade_disponivel} disponíveis)</option>`).join("")
-        : `<option value="">Sem lotes comerciais com stock</option>`;
-}
-
 async function carregarLotes() {
-    await carregarLotesParaAtribuicao();
-
     const { data, error } = await supabaseClient
         .from("lotes_comerciais")
         .select("id, numero_lote, quantidade_disponivel, artigos(designacao), encomenda_lote(quantidade_alocada, encomendas(clientes(nome)))")
@@ -1311,7 +1274,6 @@ document.getElementById("btnCriarLoteComercial").addEventListener("click", async
     toast("Lote comercial criado.", "sucesso");
     carregarLotes();
     carregarLotesComerciaisParaAbastecer();
-    carregarLotesParaAtribuicao();
 });
 
 // --- Abastecer lote comercial a partir de uma produção ---------------------
@@ -1376,31 +1338,7 @@ document.getElementById("btnAbastecer").addEventListener("click", async () => {
     document.getElementById("abQuantidade").value = "";
     toast("Lote comercial abastecido.", "sucesso");
     carregarLotes();
-    carregarLotesParaAtribuicao();
     document.getElementById("abLoteComercial").dispatchEvent(new Event("change"));
-});
-
-document.getElementById("btnAtribuir").addEventListener("click", async () => {
-    const erroEl = document.getElementById("erroAtribuicao");
-    erroEl.textContent = "";
-
-    const loteComercialId = document.getElementById("aLote").value;
-    const encomendaId = document.getElementById("aEncomenda").value;
-    const quantidade = Number(document.getElementById("aQuantidade").value);
-
-    if (!loteComercialId || !encomendaId || !quantidade) {
-        erroEl.textContent = "Escolhe o lote, a encomenda e a quantidade.";
-        return;
-    }
-
-    const { error } = await supabaseClient
-        .from("encomenda_lote")
-        .insert({ lote_comercial_id: loteComercialId, encomenda_id: encomendaId, quantidade_alocada: quantidade });
-    if (error) { erroEl.textContent = "Erro ao atribuir (confirma que há stock suficiente): " + traduzirErro(error.message); return; }
-
-    document.getElementById("aQuantidade").value = "";
-    toast("Lote atribuído — quantidade já reservada.", "sucesso");
-    carregarLotes();
 });
 
 async function atualizarBadgeAlertas() {
@@ -2231,11 +2169,12 @@ async function carregarListaArtigos() {
         .from("artigos").select("artigo_id, ref_primavera, designacao, unidade, unidade_stock, configuracao_unidades_confirmada, tipo_produto").order("designacao");
     if (error) { console.error(error); return; }
 
-    const { data: stock } = await supabaseClient.from("stock_artigo_r31").select("artigo_id,etapa,disponivel,unidade");
+    const { data: stock, error: erroStock } = await supabaseClient.from("stock_artigo_r323").select("artigo_id,etapa,disponivel,reservado,bloqueado,unidade");
+    if (erroStock) { toast("Não foi possível confirmar o stock livre. Atualiza a base de dados antes de continuar.", "erro"); return; }
     const stockPorArtigo = {};
     (stock ?? []).forEach((l) => {
         stockPorArtigo[l.artigo_id] ??= {};
-        stockPorArtigo[l.artigo_id][l.etapa] = (stockPorArtigo[l.artigo_id][l.etapa] || 0) + Number(l.disponivel);
+        stockPorArtigo[l.artigo_id][l.etapa] = (stockPorArtigo[l.artigo_id][l.etapa] || 0) + Math.max(0,Number(l.disponivel)-Number(l.reservado)-Number(l.bloqueado));
     });
 
     todosArtigosComStock = artigos.map((a) => ({ ...a, stockEtapas: stockPorArtigo[a.artigo_id] || {} }));
@@ -2259,7 +2198,7 @@ function renderizarListaArtigos() {
             <td data-rotulo="Designação">${escaparHtml(a.designacao)}</td>
             <td data-rotulo="Tipo">${escaparHtml(NOME_TIPO_PRODUTO[a.tipo_produto] ?? "Matéria-prima")}</td>
             <td data-rotulo="Unidade">${escaparHtml(formatarUnidadeStock(a.unidade_stock))}${a.configuracao_unidades_confirmada ? "" : " · configurar"}</td>
-            <td data-rotulo="Stock por etapa">${Object.entries(a.stockEtapas).map(([e,q])=>`${escaparHtml(e)}: ${Number(q).toFixed(2)}`).join(" · ")||"Sem stock"}</td>
+            <td data-rotulo="Stock livre por etapa">${Object.entries(a.stockEtapas).map(([e,q])=>`${escaparHtml(e)}: ${Number(q).toFixed(2)}`).join(" · ")||"Sem stock livre"}</td>
         `;
         tr.addEventListener("click", () => {
             location.href=`artigo.html?id=${encodeURIComponent(a.artigo_id)}`;

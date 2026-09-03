@@ -60,6 +60,7 @@ async function iniciarHomepage() {
     const perfil = await obterPerfil(session.user.id); if (!perfil) return;
     const rotaPendente = rotaPendentePrimeiroAcesso(perfil, session.user);
     if (rotaPendente) { location.href=rotaPendente; return; }
+    if (!await verificarBackendR323()) return;
     await renderizarCabecalhoUtilizador(perfil, session.user.id);
     await instalarPedidoRapidoManutencao(perfil);
     renderizarModulos(perfil);
@@ -72,8 +73,10 @@ async function iniciarHomepage() {
 }
 
 function renderizarModulos(perfil, roleVisual=null) {
-    const acessos = roleVisual ? new Set([roleVisual]) : perfil.super_admin ? new Set(MODULOS.flatMap(m=>m.roles)) : new Set([perfil.role, ...(perfil.acessosExtra||[])]);
-    document.getElementById("modulosDisponiveis").innerHTML = MODULOS.filter(m => m.roles.some(r=>acessos.has(r))).map(m =>
+    const perfilEfetivo = roleVisual
+        ? { role:roleVisual, super_admin:false, acessosExtra:[], acessosArea:[] }
+        : perfil;
+    document.getElementById("modulosDisponiveis").innerHTML = MODULOS.filter(m => paginaPermitidaR323(perfilEfetivo,m.href)).map(m =>
         `<a class="cartao-modulo" href="${m.href}"><i class="ti ti-${m.icon}"></i><span>${escaparHtml(m.nome)}</span><i class="ti ti-chevron-right"></i></a>`
     ).join("");
 }

@@ -243,6 +243,7 @@ async function iniciar() {
     renderizarCabecalhoUtilizador(contexto.perfil, contexto.session.user.id);
     renderizarAcessosExtra(contexto.perfil);
     aplicarModoOperacionalR31(contexto.perfil,"producao");
+    aplicarPermissoesProducaoR323(contexto.perfil);
     await inicializarAlertas();
     await carregar();
     await activarPesquisaArtigo("fArtigoTexto", "fArtigo", "fArtigoResultados", carregarLotesDisponiveisParaPedido);
@@ -269,6 +270,15 @@ async function iniciar() {
         .subscribe();
 
     carregarMinhasNcPartilhado(contexto.session.user.id);
+}
+
+function aplicarPermissoesProducaoR323(perfil) {
+    if (perfil?.super_admin || nivelNaArea(perfil,"producao") !== "operador") return;
+    ["plano","passagens"].forEach((secao) => {
+        document.querySelector(`button.nav-item[data-secao="${secao}"]`)?.remove();
+        const painel=document.querySelector(`section.painel[data-secao="${secao}"]`);
+        if(painel){painel.hidden=true;painel.setAttribute("aria-hidden","true");}
+    });
 }
 
 async function carregarLotesDoArtigo(artigoId, idSelect) {
