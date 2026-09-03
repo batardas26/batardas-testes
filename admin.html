@@ -86,17 +86,8 @@
                 <input type="hidden" id="fProduto">
                 <div id="fProdutoResultados" class="lista-sugestoes" style="display:none;"></div>
             </div>
-            <select id="fUnidade">
-                <option value="un">Unidade</option>
-                <option value="kg">Kg</option>
-                <option value="l">Litro</option>
-                <option value="mil">Milheiro</option>
-                <option value="pack">Pack</option>
-                <option value="pack2">Pack 2</option>
-                <option value="pack4">Pack 4</option>
-                <option value="pack6">Pack 6</option>
-                <option value="caixa">Caixa</option>
-                <option value="palete">Palete</option>
+            <select id="fUnidade" disabled>
+                <option value="">Escolhe primeiro o artigo</option>
             </select>
         </div>
         <div class="linha-form">
@@ -921,7 +912,7 @@ function obterSemanaAtual() {
 }
 
 async function activarPesquisasDeArtigo() {
-    await activarPesquisaArtigo("fProdutoTexto", "fProduto", "fProdutoResultados");
+    await activarPesquisaArtigo("fProdutoTexto", "fProduto", "fProdutoResultados", carregarUnidadesEncomendaR33);
     await activarPesquisaCliente("fClienteTexto", "fCliente", "fClienteResultados", carregarFormatosClienteR32);
     await activarPesquisaArtigo("pExtraArtigoTexto", "pExtraArtigo", "pExtraArtigoResultados");
     await activarPesquisaArtigo("rpArtigoTexto", "rpArtigo", "rpArtigoResultados");
@@ -1616,6 +1607,23 @@ async function cancelarEncomenda(encomendaId) {
 
 let linhasNovaEncomenda=[];
 
+async function carregarUnidadesEncomendaR33(artigoId, artigo){
+    const seletor=document.getElementById("fUnidade");
+    seletor.disabled=true;
+    seletor.innerHTML='<option value="">A carregar unidades…</option>';
+    const {data:conversoes,error}=await supabaseClient.from("conversoes_artigo")
+        .select("unidade_origem").eq("artigo_id",artigoId).eq("ativo",true);
+    if(error){
+        seletor.innerHTML='<option value="">Não foi possível validar as unidades</option>';
+        document.getElementById("erroRegisto").textContent="Não foi possível confirmar as unidades configuradas deste artigo.";
+        return;
+    }
+    const unidades=[...new Set([artigo?.unidade_stock,...(conversoes||[]).map(c=>c.unidade_origem)].filter(Boolean))];
+    seletor.innerHTML=unidades.map(u=>`<option value="${escaparHtml(u)}">${escaparHtml(formatarUnidadeStock(u))}</option>`).join("");
+    seletor.disabled=!unidades.length;
+    document.getElementById("erroRegisto").textContent=unidades.length?"":"Este artigo ainda não tem uma unidade de encomenda configurada.";
+}
+
 function renderizarLinhasNovaEncomenda(){
     const alvo=document.getElementById("linhasNovaEncomenda");
     if(!linhasNovaEncomenda.length){alvo.innerHTML='<p class="texto-suave">Ainda não adicionaste artigos.</p>';return;}
@@ -1630,12 +1638,13 @@ document.getElementById("btnAdicionarLinhaEncomenda").addEventListener("click",a
     const unidade=document.getElementById("fUnidade").value;
     const formato=document.getElementById("fFormatoCliente"),formatoId=formato.value||null;
     const quantidadeCaixas=formatoId?Number(document.getElementById("fQuantidadeCaixas").value):null;
-    if(!artigoId||!artigo||quantidade<=0){document.getElementById("erroRegisto").textContent="Escolhe o artigo e indica uma quantidade válida.";return;}
+    if(!artigoId||!artigo||!unidade||quantidade<=0){document.getElementById("erroRegisto").textContent="Escolhe o artigo, uma unidade configurada e indica uma quantidade válida.";return;}
     if(formatoId&&!(quantidadeCaixas>0)){document.getElementById("erroRegisto").textContent="Indica o número de caixas completas deste formato.";return;}
     const existente=linhasNovaEncomenda.find(l=>l.artigo_id===artigoId&&l.unidade===unidade&&l.formato_id===formatoId);
     if(existente){existente.quantidade+=quantidade;if(formatoId)existente.quantidade_caixas+=quantidadeCaixas;}
     else linhasNovaEncomenda.push({artigo_id:artigoId,designacao:artigo.designacao,quantidade,unidade,formato_id:formatoId,formato_nome:formatoId?formato.selectedOptions[0]?.textContent:null,quantidade_caixas:quantidadeCaixas});
     document.getElementById("fProdutoTexto").value="";document.getElementById("fProduto").value="";document.getElementById("fQuantidade").value="";
+    document.getElementById("fUnidade").innerHTML='<option value="">Escolhe primeiro o artigo</option>';document.getElementById("fUnidade").disabled=true;
     document.getElementById("erroRegisto").textContent="";renderizarLinhasNovaEncomenda();
 });
 

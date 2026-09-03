@@ -575,6 +575,7 @@ async function carregar() {
         `<tr><td colspan="4" style="text-align:center; color:var(--ink-suave);">Nada à espera de picking.</td></tr>`;
     paraPreparar.forEach((enc) => {
         const reservas=(enc.linhas_encomenda||[]).flatMap(l=>(l.reservas_linha_encomenda_r31||[]).filter(r=>r.tipo==="comercial"&&["ativa","separada"].includes(r.estado)).map(r=>({...r,produto:l.produto})));
+        const pickingPermitido=reservas.length>0 && (enc.linhas_encomenda||[]).every(l=>(l.reservas_linha_encomenda_r31||[]).some(r=>r.tipo==="comercial"&&["ativa","separada"].includes(r.estado)&&r.lotes_comerciais?.numero_lote));
         const lotes = reservas.length
             ? reservas.map((el) => `${escaparHtml(el.produto ?? "—")} · lote ${escaparHtml(el.lotes_comerciais?.numero_lote ?? "—")} (${el.quantidade_stock})`).join("<br>")
             : `<span style="color:var(--ink-suave);">Sem lote atribuído — confirma com o admin</span>`;
@@ -583,7 +584,7 @@ async function carregar() {
             <td data-rotulo="Cliente">${escaparHtml(enc.clientes?.nome ?? "—")}</td>
             <td data-rotulo="Lote a usar">${lotes}</td>
             <td data-rotulo="Entrega">${formatarData(enc.data_entrega_pretendida)}</td>
-            <td data-rotulo="Acção"><button onclick="marcarPronta('${enc.encomenda_id}')"><i class="ti ti-check" style="font-size:14px; vertical-align:-2px; margin-right:4px;" aria-hidden="true"></i>Picking concluído</button></td>
+            <td data-rotulo="Acção">${pickingPermitido?`<button onclick="marcarPronta('${enc.encomenda_id}')"><i class="ti ti-check" style="font-size:14px; vertical-align:-2px; margin-right:4px;" aria-hidden="true"></i>Picking concluído</button>`:'<button disabled title="Falta stock comercial completo com lote atribuído">Picking bloqueado</button>'}</td>
         `;
         corpoPrep.appendChild(tr);
     });
@@ -1244,10 +1245,14 @@ async function carregarReservasEmbalarR31(){
 
 let encomendaPaletizacaoAtualR31=null;
 async function carregarPaletizacaoEncomendasR31(){
-    const {data,error}=await supabaseClient.from("encomendas").select("encomenda_id,data_entrega_pretendida,clientes(nome)").in("estado",["Pronta","Embalada"]).order("data_entrega_pretendida");
+    const [{data,error},{data:resumos,error:erroResumos}]=await Promise.all([
+      supabaseClient.from("encomendas").select("encomenda_id,data_entrega_pretendida,clientes(nome)").in("estado",["Pronta","Embalada"]).order("data_entrega_pretendida"),
+      supabaseClient.from("resumo_encomendas_r31").select("encomenda_id,estado_operacional").eq("estado_operacional","pronta_para_picking")
+    ]);
     const alvo=document.getElementById("listaPaletizacaoEncomendasR31");if(!alvo)return;
-    if(error){alvo.innerHTML=`<p class="erro">${escaparHtml(traduzirErro(error.message))}</p>`;return;}
-    alvo.innerHTML=data?.length?(data||[]).map(e=>`<button class="secundario" data-abrir-paletizacao="${e.encomenda_id}" data-cliente="${escaparHtml(e.clientes?.nome||"—")}">${escaparHtml(e.clientes?.nome||"—")} · ${formatarData(e.data_entrega_pretendida)}</button>`).join(" "):'<p class="texto-suave">Sem encomendas com produto comercial completo.</p>';
+    if(error||erroResumos){alvo.innerHTML=`<p class="erro">${escaparHtml(traduzirErro((error||erroResumos).message))}</p>`;return;}
+    const elegiveis=new Set((resumos||[]).map(r=>r.encomenda_id));const lista=(data||[]).filter(e=>elegiveis.has(e.encomenda_id));
+    alvo.innerHTML=lista.length?lista.map(e=>`<button class="secundario" data-abrir-paletizacao="${e.encomenda_id}" data-cliente="${escaparHtml(e.clientes?.nome||"—")}">${escaparHtml(e.clientes?.nome||"—")} · ${formatarData(e.data_entrega_pretendida)}</button>`).join(" "):'<p class="texto-suave">Sem encomendas com produto comercial completo.</p>';
     alvo.querySelectorAll("[data-abrir-paletizacao]").forEach(b=>b.onclick=()=>abrirGestorPaletizacaoR31(b.dataset.abrirPaletizacao,b.dataset.cliente));
 }
 
@@ -1277,7 +1282,7 @@ async function abrirGestorPaletizacaoR31(encomendaId,nomeCliente){
 async function carregarPorEmbalar() {
     const { data, error } = await supabaseClient
         .from("encomendas")
-        .select("encomenda_id, data_entrega_pretendida, clientes(nome)")
+        .select("encomenda_id, data_entrega_pretendida, clientes(nome), linhas_encomenda(linha_id)")
         .eq("estado", "Em Preparação")
         .order("data_entrega_pretendida", { ascending: true });
     if (error) { console.error(error); return; }
@@ -1292,7 +1297,7 @@ async function carregarPorEmbalar() {
         tr.innerHTML = `
             <td data-rotulo="Cliente">${escaparHtml(enc.clientes?.nome ?? "—")}</td>
             <td data-rotulo="Entrega">${formatarData(enc.data_entrega_pretendida)}</td>
-            <td data-rotulo="Acção">${fluxoNovo?'<span class="texto-suave">Trata cada reserva na lista acima</span>':`<button onclick="abrirEmbalamento('${enc.encomenda_id}', '${escaparHtml(enc.clientes?.nome ?? "—")}')">Embalar (legado)</button>`}</td>
+            <td data-rotulo="Acção">${fluxoNovo?'<span class="texto-suave">Trata cada reserva recebida na lista acima</span>':'<span class="texto-suave">Fluxo antigo bloqueado — regularização pelo Super Admin</span>'}</td>
         `;
         corpo.appendChild(tr);
     });
