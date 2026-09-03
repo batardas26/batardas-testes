@@ -800,10 +800,14 @@ let ultimasNecessidades = [];
 async function recalcularNecessidades() {
     const dataPlano=document.getElementById("ppData").value;
     const resposta=await supabaseClient.rpc("necessidades_materiais_dia_r321",{p_data:dataPlano});
-    ultimasNecessidades = resposta.error
-      ? await calcularNecessidadesMateriais(itensPlanoProducao)
-      : (resposta.data||[]).map(n=>({...n,necessario:Number(n.necessario),stock:Number(n.stock),em_falta:Number(n.em_falta)}));
     const corpo = document.getElementById("corpoNecessidades");
+    if(resposta.error){
+      console.error("Falha no cálculo canónico de materiais",resposta.error);
+      ultimasNecessidades=[];
+      corpo.innerHTML=`<tr><td colspan="4" style="text-align:center; color:var(--perigo);">Não foi possível validar as matérias-primas. Não inicies a produção; atualiza a página ou contacta o responsável.</td></tr>`;
+      return;
+    }
+    ultimasNecessidades=(resposta.data||[]).map(n=>({...n,necessario:Number(n.necessario),stock:Number(n.stock),em_falta:Number(n.em_falta)}));
     corpo.innerHTML = ultimasNecessidades.length ? "" :
         `<tr><td colspan="4" style="text-align:center; color:var(--ink-suave);">Adiciona produtos ao plano para veres as matérias-primas necessárias.</td></tr>`;
     ultimasNecessidades.forEach((n) => {
