@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TESTES — Preparação / Armazém — Batardas</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.34.1/dist/tabler-icons.min.css">
 <link rel="icon" href="img/logo.png" type="image/png">
 <link rel="stylesheet" href="css/style.css">
 </head>
@@ -631,14 +631,7 @@ async function carregar() {
 }
 
 async function marcarPronta(encomendaId) {
-    const { data: { session } } = await supabaseClient.auth.getSession();
-    const { error } = await supabaseClient
-        .from("encomendas")
-        .update({
-            data_conclusao_preparacao: new Date().toISOString(),
-            preparado_por: session.user.id,
-        })
-        .eq("encomenda_id", encomendaId);
+    const { error } = await supabaseClient.rpc("concluir_picking_r322", { p_encomenda: encomendaId });
     if (error) { toast("Erro ao actualizar: " + error.message, "erro"); return; }
     carregar();
     toast("Picking concluído — a encomenda está pronta para carregar.", "sucesso");
@@ -1256,16 +1249,23 @@ async function carregarPaletizacaoEncomendasR31(){
 async function abrirGestorPaletizacaoR31(encomendaId,nomeCliente){
     encomendaPaletizacaoAtualR31=encomendaId;const gestor=document.getElementById("gestorPaletizacaoR31");gestor.style.display="block";
     const [{data:linhas},{data:paletes},{data:reservas}]=await Promise.all([
-      supabaseClient.from("linhas_encomenda").select("linha_id,produto").eq("encomenda_id",encomendaId).order("ordem"),
+      supabaseClient.from("linhas_encomenda").select("linha_id,produto,artigo_id").eq("encomenda_id",encomendaId).order("ordem"),
       supabaseClient.from("paletes_encomenda_r31").select("id,codigo,sscc,estado,palete_caixas_r31(caixa_id,quantidade_stock,linhas_encomenda(produto),unidades_logisticas(codigo))").eq("encomenda_id",encomendaId).order("criada_em"),
       supabaseClient.from("reservas_linha_encomenda_r31").select("linha_id,lote_comercial_id").in("linha_id",(await supabaseClient.from("linhas_encomenda").select("linha_id").eq("encomenda_id",encomendaId)).data?.map(x=>x.linha_id)||[]).eq("tipo","comercial").in("estado",["ativa","separada"]),
     ]);
     const lotes=[...new Set((reservas||[]).map(r=>r.lote_comercial_id))];let caixas=[];
-    if(lotes.length){const {data}=await supabaseClient.from("unidades_logisticas").select("id,codigo,lote_comercial_id,quantidade_conteudo,unidade_conteudo").eq("tipo","caixa").eq("estado","fechada").is("unidade_pai_id",null).in("lote_comercial_id",lotes);caixas=data||[];}
+    if(lotes.length){
+      const {data,error:erroCaixas}=await supabaseClient.from("unidades_logisticas")
+        .select("id,codigo,lote_comercial_id,quantidade_conteudo,unidade_conteudo,encomenda_id_r32,conteudos_caixa_r32(lote_comercial_id,artigo_id,quantidade_restante)")
+        .eq("tipo","caixa").eq("estado","fechada").is("unidade_pai_id",null);
+      if(erroCaixas){gestor.innerHTML=`<p class="erro">${escaparHtml(traduzirErro(erroCaixas.message))}</p>`;return;}
+      caixas=(data||[]).filter(c=>!c.encomenda_id_r32||c.encomenda_id_r32===encomendaId)
+        .filter(c=>(c.conteudos_caixa_r32||[]).some(x=>lotes.includes(x.lote_comercial_id)&&x.quantidade_restante>0));
+    }
     const usadas=new Set((paletes||[]).flatMap(p=>(p.palete_caixas_r31||[]).map(c=>c.caixa_id)));caixas=caixas.filter(c=>!usadas.has(c.id));
-    gestor.innerHTML=`<h3>Paletização — ${escaparHtml(nomeCliente)}</h3><p class="texto-suave">O SSCC é gerado automaticamente quando fechares a palete.</p><div class="linha-form"><input id="plCodigo" placeholder="Código interno da palete"><button id="plCriar">Criar palete</button></div><div>${(paletes||[]).map(p=>`<article class="etapa-stock-r31"><strong>${escaparHtml(p.codigo)}</strong> · ${escaparHtml(p.estado)}${p.sscc?` · SSCC ${escaparHtml(p.sscc)}`:""}<ul>${(p.palete_caixas_r31||[]).map(c=>`<li>${escaparHtml(c.unidades_logisticas?.codigo||"—")} · ${escaparHtml(c.linhas_encomenda?.produto||"—")} · ${c.quantidade_stock}</li>`).join("")}</ul>${p.estado==="aberta"?`<button data-fechar-palete="${p.id}">Fechar palete e gerar SSCC</button>`:""}</article>`).join("")||'<p class="texto-suave">Ainda sem paletes.</p>'}</div>${(paletes||[]).some(p=>p.estado==="aberta")&&caixas.length?`<div class="linha-form" style="margin-top:12px"><select id="plPalete">${paletes.filter(p=>p.estado==="aberta").map(p=>`<option value="${p.id}">${escaparHtml(p.codigo)}</option>`).join("")}</select><select id="plCaixa">${caixas.map(c=>`<option value="${c.id}">${escaparHtml(c.codigo)} · ${c.quantidade_conteudo} ${formatarUnidadeStock(c.unidade_conteudo)}</option>`).join("")}</select><select id="plLinha">${(linhas||[]).map(l=>`<option value="${l.linha_id}">${escaparHtml(l.produto)}</option>`).join("")}</select><button id="plAdicionarCaixa">Adicionar caixa</button></div>`:""}<p id="plErro" class="erro"></p>`;
+    gestor.innerHTML=`<h3>Paletização — ${escaparHtml(nomeCliente)}</h3><p class="texto-suave">Escolhe uma caixa completa ou multiproduto. A app valida todos os artigos e lotes e gera o SSCC ao fechar.</p><div class="linha-form"><input id="plCodigo" placeholder="Código interno da palete"><button id="plCriar">Criar palete</button></div><div>${(paletes||[]).map(p=>`<article class="etapa-stock-r31"><strong>${escaparHtml(p.codigo)}</strong> · ${escaparHtml(p.estado)}${p.sscc?` · SSCC ${escaparHtml(p.sscc)}`:""}<ul>${(p.palete_caixas_r31||[]).map(c=>`<li>${escaparHtml(c.unidades_logisticas?.codigo||"—")} · ${c.quantidade_stock}</li>`).join("")}</ul>${p.estado==="aberta"?`<button data-fechar-palete="${p.id}">Fechar palete e gerar SSCC</button>`:""}</article>`).join("")||'<p class="texto-suave">Ainda sem paletes.</p>'}</div>${(paletes||[]).some(p=>p.estado==="aberta")&&caixas.length?`<div class="linha-form" style="margin-top:12px"><select id="plPalete">${paletes.filter(p=>p.estado==="aberta").map(p=>`<option value="${p.id}">${escaparHtml(p.codigo)}</option>`).join("")}</select><select id="plCaixa">${caixas.map(c=>`<option value="${c.id}">${escaparHtml(c.codigo)} · ${c.quantidade_conteudo} ${formatarUnidadeStock(c.unidade_conteudo)}</option>`).join("")}</select><button id="plAdicionarCaixa">Adicionar caixa</button></div>`:""}<p id="plErro" class="erro"></p>`;
     gestor.querySelector("#plCriar").onclick=async()=>{const {error}=await supabaseClient.rpc("criar_palete_encomenda_r31",{p_encomenda:encomendaId,p_codigo:gestor.querySelector("#plCodigo").value,p_sscc:null});if(error){gestor.querySelector("#plErro").textContent=traduzirErro(error.message);return;}await abrirGestorPaletizacaoR31(encomendaId,nomeCliente);};
-    gestor.querySelector("#plAdicionarCaixa")?.addEventListener("click",async()=>{const {error}=await supabaseClient.rpc("adicionar_caixa_palete_r31",{p_palete:gestor.querySelector("#plPalete").value,p_caixa:gestor.querySelector("#plCaixa").value,p_linha:gestor.querySelector("#plLinha").value});if(error){gestor.querySelector("#plErro").textContent=traduzirErro(error.message);return;}await abrirGestorPaletizacaoR31(encomendaId,nomeCliente);});
+    gestor.querySelector("#plAdicionarCaixa")?.addEventListener("click",async()=>{const {error}=await supabaseClient.rpc("adicionar_caixa_palete_r322",{p_palete:gestor.querySelector("#plPalete").value,p_caixa:gestor.querySelector("#plCaixa").value});if(error){gestor.querySelector("#plErro").textContent=traduzirErro(error.message);return;}await abrirGestorPaletizacaoR31(encomendaId,nomeCliente);});
     gestor.querySelectorAll("[data-fechar-palete]").forEach(b=>b.onclick=async()=>{const {data:sscc,error}=await supabaseClient.rpc("fechar_palete_r32",{p_palete:b.dataset.fecharPalete});if(error){gestor.querySelector("#plErro").textContent=traduzirErro(error.message);return;}toast(`Palete fechada · SSCC ${sscc}`,"sucesso");await abrirGestorPaletizacaoR31(encomendaId,nomeCliente);});
 }
 
@@ -1407,14 +1407,7 @@ document.getElementById("btnConcluirEmbalamento").addEventListener("click", asyn
         if (error) { erroEl.textContent = `Quebra: ${traduzirErro(error.message)}`; return; }
     }
 
-    const { data: { session } } = await supabaseClient.auth.getSession();
-    const { error: erroEstado } = await supabaseClient.from("encomendas").update({
-        estado: "Pronta",
-        data_conclusao_embalamento: new Date().toISOString(),
-        embalado_por: session.user.id,
-        data_conclusao_preparacao: null,
-        preparado_por: null,
-    }).eq("encomenda_id", encomendaEmbalarId);
+    const { error: erroEstado } = await supabaseClient.rpc("concluir_embalamento_encomenda_r322", { p_encomenda: encomendaEmbalarId });
     if (erroEstado) { erroEl.textContent = traduzirErro(erroEstado.message); return; }
 
     toast("Embalamento concluído — encomenda Pronta para picking e impressão de etiquetas.", "sucesso");

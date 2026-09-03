@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TESTES — Gestão de Encomendas — Batardas</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.34.1/dist/tabler-icons.min.css">
 <link rel="icon" href="img/logo.png" type="image/png">
 <link rel="stylesheet" href="css/style.css">
 </head>
@@ -1648,7 +1648,7 @@ async function carregar() {
     corpoTodas.innerHTML = "";
     todas.forEach((enc) => {
         const classeEstado = CLASSE_ESTADO[enc.estado] ?? "Registada";
-        const podeCancelar = enc.estado !== "Cancelada";
+        const podeCancelar = !["Cancelada", "Carregada"].includes(enc.estado);
         const tr = document.createElement("tr");
         tr.innerHTML = `
             <td data-rotulo="Cliente"><strong>${escaparHtml(enc.clientes?.nome ?? "—")}</strong>${(enc.linhas_encomenda||[]).map(l=>{const r=resumoPorLinha[l.linha_id]||{};return `<div class="linha-encomenda-resumo-r31">${escaparHtml(l.produto)} · ${l.quantidade_pedida} ${formatarUnidadeStock(l.unidade_movimentacao)}<small>Pronto ${r.quantidade_pronta_stock??0} · Por embalar ${r.quantidade_por_embalar_stock??0} · Por produzir ${r.quantidade_por_produzir_stock??0} ${formatarUnidadeStock(r.unidade_stock)}</small></div>`;}).join("")}</td>
@@ -1667,20 +1667,9 @@ async function cancelarEncomenda(encomendaId) {
     if (motivo === null) return; // carregou em "Cancelar" da caixa do browser, desistiu
     if (!confirm("Cancelar esta encomenda? Se já tinha lote atribuído, a quantidade volta ao lote comercial automaticamente.")) return;
 
-    const { data: { session } } = await supabaseClient.auth.getSession();
-
-    // Remove primeiro as atribuições de lote (o trigger devolve a
-    // quantidade sozinho) — só depois marca a encomenda como cancelada,
-    // para nunca ficar uma atribuição "pendurada" numa encomenda cancelada.
-    const { error: erroLotes } = await supabaseClient.from("encomenda_lote").delete().eq("encomenda_id", encomendaId);
-    if (erroLotes) { toast("Erro ao libertar lotes: " + traduzirErro(erroLotes.message), "erro"); return; }
-
-    const { error } = await supabaseClient.from("encomendas").update({
-        estado: "Cancelada",
-        cancelada_em: new Date().toISOString(),
-        cancelada_por: session.user.id,
-        motivo_cancelamento: motivo || null,
-    }).eq("encomenda_id", encomendaId);
+    const { error } = await supabaseClient.rpc("cancelar_encomenda_r322", {
+        p_encomenda: encomendaId, p_motivo: motivo,
+    });
     if (error) { toast("Erro ao cancelar: " + traduzirErro(error.message), "erro"); return; }
 
     toast("Encomenda cancelada.", "sucesso");
@@ -1707,7 +1696,7 @@ document.getElementById("btnAdicionarLinhaEncomenda").addEventListener("click",a
     if(formatoId&&!(quantidadeCaixas>0)){document.getElementById("erroRegisto").textContent="Indica o número de caixas completas deste formato.";return;}
     const existente=linhasNovaEncomenda.find(l=>l.artigo_id===artigoId&&l.unidade===unidade&&l.formato_id===formatoId);
     if(existente){existente.quantidade+=quantidade;if(formatoId)existente.quantidade_caixas+=quantidadeCaixas;}
-    else linhasNovaEncomenda.push({artigo_id:artigoId,designacao:artigo.designacao,quantidade,unidade,formato_id:formatoId,formato_nome:formato.selectedOptions[0]?.textContent,quantidade_caixas:quantidadeCaixas});
+    else linhasNovaEncomenda.push({artigo_id:artigoId,designacao:artigo.designacao,quantidade,unidade,formato_id:formatoId,formato_nome:formatoId?formato.selectedOptions[0]?.textContent:null,quantidade_caixas:quantidadeCaixas});
     document.getElementById("fProdutoTexto").value="";document.getElementById("fProduto").value="";document.getElementById("fQuantidade").value="";
     document.getElementById("erroRegisto").textContent="";renderizarLinhasNovaEncomenda();
 });
@@ -1823,7 +1812,8 @@ document.getElementById("btnPdf").addEventListener("click", async () => {
 
 // --- Exportar histórico de entregas com lotes (CSV / PDF) ----------------
 function paraCsv(valor) {
-    const texto = String(valor ?? "");
+    let texto = String(valor ?? "");
+    if (/^[=+\-@\t\r]/.test(texto)) texto = "'" + texto;
     return /[";\n]/.test(texto) ? `"${texto.replace(/"/g, '""')}"` : texto;
 }
 

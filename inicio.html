@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TESTES — Início — Batardas</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.34.1/dist/tabler-icons.min.css">
 <link rel="icon" href="img/logo.png" type="image/png"><link rel="stylesheet" href="css/style.css">
 </head>
 <body class="pagina-inicio">
@@ -148,7 +148,7 @@ async function carregarSupervisaoDiaR31(){
     ]);
     const pessoasIds=[...new Set((tarefas||[]).flatMap(t=>[t.atribuida_a,t.concluida_por]).filter(Boolean))];
     let nomes={};
-    if(pessoasIds.length){const {data:pessoas}=await supabaseClient.from("perfis").select("id,nome").in("id",pessoasIds);nomes=Object.fromEntries((pessoas||[]).map(p=>[p.id,p.nome]));}
+    if(pessoasIds.length){const {data:pessoas}=await supabaseClient.rpc("listar_diretorio_perfis_r322");nomes=Object.fromEntries((pessoas||[]).filter(p=>pessoasIds.includes(p.id)).map(p=>[p.id,p.nome]));}
     const hora=v=>v?new Date(v).toLocaleTimeString("pt-PT",{hour:"2-digit",minute:"2-digit"}):"—";
     const rotuloEvento={aberto:"Aberto",reaberto:"Reaberto",fechado:"Fechado"};
     alvo.innerHTML=dias.map(d=>{
@@ -212,7 +212,7 @@ async function carregarPessoasAreaR31(){
     const hoje=new Date().toISOString().slice(0,10);
     const {data:acessos}=await supabaseClient.from("acessos_area_r31").select("perfil_id").eq("area",area).in("nivel",["operador","responsavel"]).lte("valido_desde",hoje).or(`valido_ate.is.null,valido_ate.gte.${hoje}`);
     const ids=[...new Set((acessos||[]).map(a=>a.perfil_id))];
-    let pessoas=[];if(ids.length){const {data}=await supabaseClient.from("perfis").select("id,nome").in("id",ids).order("nome");pessoas=data||[];}
+    let pessoas=[];if(ids.length){const {data}=await supabaseClient.rpc("listar_diretorio_perfis_r322");pessoas=(data||[]).filter(p=>ids.includes(p.id));}
     seletor.innerHTML='<option value="">Equipa da área</option>'+pessoas.map(p=>`<option value="${p.id}">${escaparHtml(p.nome)}</option>`).join("");
 }
 iniciarHomepage();

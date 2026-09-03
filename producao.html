@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TESTES — Produção — Batardas</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.34.1/dist/tabler-icons.min.css">
 <link rel="icon" href="img/logo.png" type="image/png">
 <link rel="stylesheet" href="css/style.css">
 </head>
@@ -535,14 +535,18 @@ async function carregarMateriaisNecessarios(artigoIds) {
 }
 
 async function carregarNecessidadesEncomendasR31(){
-    const {data,error}=await supabaseClient.from("necessidades_producao_linha_r31").select("id,linha_id,quantidade_stock,quantidade_un,estado,linhas_encomenda(produto,unidade_movimentacao,encomendas(data_entrega_pretendida,clientes(nome)))").gt("quantidade_un",0).in("estado",["pendente","parcial","planeada"]).order("atualizada_em");
+    let {data,error}=await supabaseClient.rpc("listar_necessidades_producao_r321");
+    if(error&&/function|schema cache|listar_necessidades/i.test(error.message||"")){
+      const antiga=await supabaseClient.from("necessidades_producao_linha_r31").select("id,linha_id,quantidade_stock,quantidade_un,estado,linhas_encomenda(produto,unidade_movimentacao,encomendas(data_entrega_pretendida,clientes(nome)))").gt("quantidade_un",0).in("estado",["pendente","parcial","planeada"]).order("atualizada_em");
+      data=(antiga.data||[]).map(n=>({...n,produto:n.linhas_encomenda?.produto,unidade_movimentacao:n.linhas_encomenda?.unidade_movimentacao,data_entrega_pretendida:n.linhas_encomenda?.encomendas?.data_entrega_pretendida,cliente:n.linhas_encomenda?.encomendas?.clientes?.nome}));error=antiga.error;
+    }
     const corpo=document.getElementById("corpoNecessidadesEncomendasR31");
     if(error){corpo.innerHTML=`<tr><td colspan="4">${escaparHtml(traduzirErro(error.message))}</td></tr>`;return;}
     const ids=(data||[]).map(n=>n.id);let planos=[];
     if(ids.length){const resposta=await supabaseClient.from("plano_producao").select("id,necessidade_linha_id,data_planeada,estado_r31").in("necessidade_linha_id",ids).in("estado_r31",["planeado","em_producao"]).order("criado_em",{ascending:false});if(resposta.error){corpo.innerHTML=`<tr><td colspan="4">${escaparHtml(traduzirErro(resposta.error.message))}</td></tr>`;return;}planos=resposta.data||[];}
     const planoPorNecessidade=new Map();planos.forEach(p=>{if(!planoPorNecessidade.has(p.necessidade_linha_id))planoPorNecessidade.set(p.necessidade_linha_id,p);});
     corpo.innerHTML=data?.length?"":'<tr><td colspan="4">Sem necessidades líquidas por planear.</td></tr>';
-    (data||[]).forEach(n=>{const tr=document.createElement("tr"),linha=n.linhas_encomenda,enc=linha?.encomendas,plano=planoPorNecessidade.get(n.id);let acao;if(plano){acao=`<span class="badge Em-Producao">${plano.estado_r31==="em_producao"?"Em produção":"Planeada"} · ${formatarData(plano.data_planeada)}</span><div class="linha-form" style="margin-top:6px;"><input type="date" value="${plano.data_planeada}" data-data-reagendar="${plano.id}" ${plano.estado_r31!=="planeado"?"disabled":""}><button class="secundario" data-reagendar-plano="${plano.id}" ${plano.estado_r31!=="planeado"?"disabled":""}>Reagendar</button><button data-abrir-dia-producao="${plano.data_planeada}">Abrir dia</button></div>`;}else{acao=`<div class="linha-form"><input type="date" value="${amanha()}" data-data-planear="${n.id}"><button data-planear-necessidade="${n.id}">Adicionar ao plano</button></div>`;}tr.innerHTML=`<td><strong>${escaparHtml(enc?.clientes?.nome||"—")}</strong><small>${escaparHtml(linha?.produto||"—")}</small></td><td>${n.quantidade_un} UN <small>equivalente a ${n.quantidade_stock} na unidade de stock</small></td><td>${formatarData(enc?.data_entrega_pretendida)}</td><td>${acao}</td>`;corpo.appendChild(tr);});
+    (data||[]).forEach(n=>{const tr=document.createElement("tr"),plano=planoPorNecessidade.get(n.id);let acao;if(plano){acao=`<span class="badge Em-Producao">${plano.estado_r31==="em_producao"?"Em produção":"Planeada"} · ${formatarData(plano.data_planeada)}</span><div class="linha-form" style="margin-top:6px;"><input type="date" value="${plano.data_planeada}" data-data-reagendar="${plano.id}" ${plano.estado_r31!=="planeado"?"disabled":""}><button class="secundario" data-reagendar-plano="${plano.id}" ${plano.estado_r31!=="planeado"?"disabled":""}>Reagendar</button><button data-abrir-dia-producao="${plano.data_planeada}">Abrir dia</button></div>`;}else{acao=`<div class="linha-form"><input type="date" value="${amanha()}" data-data-planear="${n.id}"><button data-planear-necessidade="${n.id}">Adicionar ao plano</button></div>`;}tr.innerHTML=`<td><strong>${escaparHtml(n.cliente||"—")}</strong><small>${escaparHtml(n.produto||"—")}</small></td><td>${n.quantidade_un} UN <small>equivalente a ${n.quantidade_stock} ${formatarUnidadeStock(n.unidade_movimentacao)}</small></td><td>${formatarData(n.data_entrega_pretendida)}</td><td>${acao}</td>`;corpo.appendChild(tr);});
     corpo.querySelectorAll("[data-planear-necessidade]").forEach(b=>b.onclick=async()=>{const dataPlano=corpo.querySelector(`[data-data-planear="${b.dataset.planearNecessidade}"]`).value;if(!dataPlano){toast("Escolhe o dia em que esta produção será feita.","erro");return;}const {error}=await supabaseClient.rpc("planear_necessidade_producao_r31",{p_necessidade:b.dataset.planearNecessidade,p_data:dataPlano});if(error){toast(traduzirErro(error.message),"erro");return;}toast(`Necessidade adicionada ao plano de ${formatarData(dataPlano)}.`,"sucesso");document.getElementById("ppData").value=dataPlano;await carregarNecessidadesEncomendasR31();await carregarPlanoDoDia();});
     corpo.querySelectorAll("[data-reagendar-plano]").forEach(b=>b.onclick=async()=>{const dataPlano=corpo.querySelector(`[data-data-reagendar="${b.dataset.reagendarPlano}"]`).value;if(!dataPlano){toast("Escolhe a nova data.","erro");return;}const {error}=await supabaseClient.rpc("reagendar_plano_producao_r312",{p_plano:b.dataset.reagendarPlano,p_data:dataPlano});if(error){toast(traduzirErro(error.message),"erro");return;}toast(`Produção reagendada para ${formatarData(dataPlano)}.`,"sucesso");await carregarNecessidadesEncomendasR31();});
     corpo.querySelectorAll("[data-abrir-dia-producao]").forEach(b=>b.onclick=()=>{document.getElementById("pdData").value=b.dataset.abrirDiaProducao;mudarSecao("producao");carregarProducaoDiaria();});
@@ -649,19 +653,24 @@ async function carregarProducaoDiaria() {
 }
 
 async function abrirAfetacaoPaProduzido(item){
+    const componentesPrevistos=new Set((item.bom_snapshot_r32?.componentes||[]).map(c=>c.componente_id));
+    const hoje=new Date().toISOString().slice(0,10);
     const [{data:intermedios,error},{data:fornecedor},{data:locais}]=await Promise.all([
-      supabaseClient.from("lotes_internos").select("id,artigo_id,numero_lote,quantidade_disponivel,unidade_base,artigos(designacao)").eq("tipo","intermedio").gt("quantidade_disponivel",0).order("produzido_em"),
-      supabaseClient.from("lotes_artigo").select("lote_artigo_id,artigo_id,numero_lote,quantidade_atual,validade,artigos(designacao,unidade_stock)").eq("estado_qualidade","disponivel").gt("quantidade_atual",0).order("validade"),
+      supabaseClient.from("lotes_internos").select("id,artigo_id,numero_lote,quantidade_disponivel,unidade_base,validade,estado,artigos(designacao)").eq("tipo","intermedio").not("estado","in",'(bloqueado,quarentena,esgotado)').gt("quantidade_disponivel",0).order("produzido_em"),
+      supabaseClient.from("lotes_artigo").select("lote_artigo_id,artigo_id,numero_lote,quantidade_atual,validade,artigos(designacao,unidade_stock,gere_lotes_r32)").eq("estado_qualidade","disponivel").gt("quantidade_atual",0).order("validade"),
       supabaseClient.from("localizacoes").select("localizacao_id,nome").order("nome")
     ]);
     if(error){toast(traduzirErro(error.message),"erro");return;}
     const fundo=document.createElement("div");fundo.className="modal-r31";
-    const origens=[...(intermedios||[]).map(l=>({id:l.id,artigo:l.artigo_id,nome:l.artigos?.designacao,lote:l.numero_lote,q:l.quantidade_disponivel,u:l.unidade_base,origem:"interno"})),...(fornecedor||[]).map(l=>({id:l.lote_artigo_id,artigo:l.artigo_id,nome:l.artigos?.designacao,lote:l.numero_lote,q:l.quantidade_atual,u:l.artigos?.unidade_stock,origem:"fornecedor"}))];
+    const origens=[...(intermedios||[]).filter(l=>componentesPrevistos.has(l.artigo_id)&&(!l.validade||l.validade>=hoje)).map(l=>({id:l.id,artigo:l.artigo_id,nome:l.artigos?.designacao,lote:l.numero_lote,q:l.quantidade_disponivel,u:l.unidade_base,origem:"interno"})),...(fornecedor||[]).filter(l=>componentesPrevistos.has(l.artigo_id)&&(!l.artigos?.gere_lotes_r32||!!l.validade)&&(!l.validade||l.validade>=hoje)).map(l=>({id:l.lote_artigo_id,artigo:l.artigo_id,nome:l.artigos?.designacao,lote:l.numero_lote,q:l.quantidade_atual,u:l.artigos?.unidade_stock,origem:"fornecedor",validade:l.validade}))];
     fundo.innerHTML=`<div class="cartao modal-r31-conteudo"><h2>Concluir produção e criar lote interno</h2><p>${escaparHtml(item.artigos?.designacao||"—")} · planeado ${item.quantidade} UN para ${formatarData(item.data_planeada)}</p><p class="texto-suave">A aplicação cria um lote novo de PA já congelado. Não escolhas um lote antigo.</p><div class="linha-form"><div><label>Quantidade boa obtida (UN)</label><input id="apQuantidade" type="number" min="0" step="any" value="${item.quantidade}"></div><div><label>Quebra (UN)</label><input id="apQuebra" type="number" min="0" step="any" value="0"></div></div><label>Motivo da quebra</label><input id="apMotivo" type="text" placeholder="Obrigatório quando existe quebra"><label>Motivo da diferença entre planeado e realizado</label><input id="apMotivoDiferenca" type="text" placeholder="Obrigatório se o resultado não coincidir com o planeado"><div class="linha-form"><select id="apLocal"><option value="">Armazém por definir</option>${(locais||[]).map(l=>`<option value="${l.localizacao_id}">${escaparHtml(l.nome)}</option>`).join("")}</select><input id="apValidade" type="date" aria-label="Validade interna"></div><h3>Consumos realmente utilizados</h3><p class="texto-suave">Seleciona MP de fornecedor e intermédios. O saldo não consumido permanece disponível.</p><div id="apOrigens">${origens.map(l=>`<div class="linha-form origem-producao-r313"><label><input type="checkbox" data-origem-id="${l.id}" data-origem-artigo="${l.artigo}" data-origem-tipo="${l.origem}" data-origem-unidade="${l.u}"> ${escaparHtml(l.nome||"—")} · <span class="mono">${escaparHtml(l.lote)}</span> · disponível ${l.q} ${formatarUnidadeStock(l.u)}</label><input type="number" min="0" max="${l.q}" step="any" data-origem-q="${l.id}" placeholder="Quantidade consumida" disabled></div>`).join("")||'<p class="texto-suave">Sem lotes disponíveis.</p>'}</div><p class="texto-suave">A diferença entre planeado, bom e quebra fica como “não produzida” e continua necessária para a encomenda.</p><p id="apErro" class="erro"></p><div class="linha-form"><button id="apCancelar" class="secundario">Voltar</button><button id="apConfirmar">Confirmar resultado real</button></div></div>`;
     fundo.querySelector("#apErro").insertAdjacentHTML("beforebegin",'<p class="texto-suave">Numa perda total, coloca 0 UN boas e regista toda a quantidade como quebra; não será criado stock.</p>');
     document.body.appendChild(fundo);
     fundo.querySelectorAll("[data-origem-id]").forEach(c=>c.onchange=()=>{fundo.querySelector(`[data-origem-q="${c.dataset.origemId}"]`).disabled=!c.checked;});
-    fundo.querySelector("#apCancelar").onclick=()=>fundo.remove();
+    fundo.querySelector("#apCancelar").type="button";fundo.querySelector("#apConfirmar").type="button";
+    fundo.querySelector("#apCancelar").onclick=(evento)=>{evento.preventDefault();fundo.remove();};
+    fundo.addEventListener("click",evento=>{if(evento.target===fundo)fundo.remove();});
+    fundo.addEventListener("keydown",evento=>{if(evento.key==="Escape")fundo.remove();});
     fundo.querySelector("#apConfirmar").onclick=async()=>{const q=Number(fundo.querySelector("#apQuantidade").value)||0,quebra=Number(fundo.querySelector("#apQuebra").value)||0,motivo=fundo.querySelector("#apMotivo").value.trim(),motivoDiferenca=fundo.querySelector("#apMotivoDiferenca").value.trim();const consumos=[...fundo.querySelectorAll("[data-origem-id]:checked")].map(c=>({lote_id:c.dataset.origemId,componente_id:c.dataset.origemArtigo,componente_previsto_id:c.dataset.origemArtigo,origem:c.dataset.origemTipo,unidade:c.dataset.origemUnidade,quantidade:Number(fundo.querySelector(`[data-origem-q="${c.dataset.origemId}"]`).value),substituicao:false}));if(consumos.some(o=>!o.quantidade)){fundo.querySelector("#apErro").textContent="Indica a quantidade de cada lote selecionado.";return;}const botao=fundo.querySelector("#apConfirmar");botao.disabled=true;const {data:novoLote,error:erro}=await supabaseClient.rpc("concluir_producao_r32",{p_plano:item.id,p_quantidade_boa_un:q,p_quebra_un:quebra,p_motivo_quebra:motivo||null,p_consumos:consumos,p_localizacao:fundo.querySelector("#apLocal").value||null,p_validade:fundo.querySelector("#apValidade").value||null,p_motivo_diferenca:motivoDiferenca||null});if(erro){fundo.querySelector("#apErro").textContent=traduzirErro(erro.message);botao.disabled=false;return;}fundo.remove();toast(q>0?`Produção concluída e novo lote interno ${novoLote} criado.`:"Perda total registada sem criar stock fictício.","sucesso");await carregarProducaoDiaria();await carregarNecessidadesEncomendasR31();};
 }
 
@@ -721,7 +730,7 @@ async function carregarPlanoDoDia() {
         .order("criado_em", { ascending: true });
     if (error) { console.error(error); return; }
 
-    itensPlanoProducao = (data ?? []).map((l) => ({ artigo_id: l.artigo_id, quantidade: Number(l.quantidade) }));
+    itensPlanoProducao = (data ?? []).map((l) => ({ artigo_id: l.artigo_id, quantidade: Number(l.quantidade), bom_snapshot_r32:l.bom_snapshot_r32 }));
 
     const corpo = document.getElementById("corpoPlanoProducao");
     corpo.innerHTML = data.length ? "" :
@@ -779,7 +788,11 @@ document.getElementById("btnAdicionarPlano").addEventListener("click", async () 
 let ultimasNecessidades = [];
 
 async function recalcularNecessidades() {
-    ultimasNecessidades = await calcularNecessidadesMateriais(itensPlanoProducao);
+    const dataPlano=document.getElementById("ppData").value;
+    const resposta=await supabaseClient.rpc("necessidades_materiais_dia_r321",{p_data:dataPlano});
+    ultimasNecessidades = resposta.error
+      ? await calcularNecessidadesMateriais(itensPlanoProducao)
+      : (resposta.data||[]).map(n=>({...n,necessario:Number(n.necessario),stock:Number(n.stock),em_falta:Number(n.em_falta)}));
     const corpo = document.getElementById("corpoNecessidades");
     corpo.innerHTML = ultimasNecessidades.length ? "" :
         `<tr><td colspan="4" style="text-align:center; color:var(--ink-suave);">Adiciona produtos ao plano para veres as matérias-primas necessárias.</td></tr>`;

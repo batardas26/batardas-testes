@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TESTES — Qualidade — Batardas</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.34.1/dist/tabler-icons.min.css">
 <link rel="icon" href="img/logo.png" type="image/png">
 <link rel="stylesheet" href="css/style.css">
 </head>
@@ -225,35 +225,32 @@ document.getElementById("btnGuardarAuditoria").addEventListener("click", async (
 
     if (!data) { erroEl.textContent = "Escolhe a data da auditoria."; return; }
 
-    const { data: auditoria, error } = await supabaseClient
-        .from("auditorias")
-        .insert({ tipo, data_auditoria: data, zona_id: zonaId, lote_artigo_id: artigoId, observacoes })
-        .select("id").single();
+    const ncsParaGuardar = ncPendentesDaAuditoriaActual.map(({ provas, responsavel_ids, ...nc }) => ({
+        ...nc, responsavel_ids,
+    }));
+    const { data: resultado, error } = await supabaseClient.rpc("registar_auditoria_r322", {
+        p_tipo: tipo, p_data: data, p_zona: zonaId, p_lote_artigo: artigoId,
+        p_observacoes: observacoes, p_nao_conformidades: ncsParaGuardar,
+    });
     if (error) { erroEl.textContent = "Erro ao guardar: " + traduzirErro(error.message); return; }
 
-    for (const nc of ncPendentesDaAuditoriaActual) {
-        const { responsavel_ids, provas, ...camposNc } = nc;
-        const { data: ncCriada, error: erroNc } = await supabaseClient
-            .from("nao_conformidades").insert({ ...camposNc, auditoria_id: auditoria.id }).select("id").single();
-        if (erroNc) { erroEl.textContent = "Erro ao guardar não-conformidade: " + traduzirErro(erroNc.message); continue; }
-        if (responsavel_ids.length) {
-            const { error: erroResponsaveis } = await supabaseClient.from("nc_responsaveis").insert(
-                responsavel_ids.map((perfil_id) => ({ nao_conformidade_id: ncCriada.id, perfil_id }))
-            );
-            if (erroResponsaveis) {
-                erroEl.textContent = "A não-conformidade foi guardada, mas falhou ao atribuir responsável: " + traduzirErro(erroResponsaveis.message);
-                continue;
-            }
-        }
-        for (const ficheiro of provas ?? []) {
-            const resultado = await carregarFicheiroAnexoNc(ncCriada.id, "prova", ficheiro);
-            if (!resultado.ok) {
-                erroEl.textContent = `A não-conformidade foi guardada, mas "${ficheiro.name}" falhou ao anexar: ${traduzirErro(resultado.erro)}`;
-            }
+    const falhasAnexos = [];
+    for (let i=0;i<ncPendentesDaAuditoriaActual.length;i++) {
+        const nc = ncPendentesDaAuditoriaActual[i];
+        const ncId = resultado?.nc_ids?.[i];
+        for (const ficheiro of nc.provas ?? []) {
+            const envio = await carregarFicheiroAnexoNc(ncId, "prova", ficheiro);
+            if (!envio.ok) falhasAnexos.push(`${ficheiro.name}: ${traduzirErro(envio.erro)}`);
         }
     }
 
-    toast(`Auditoria registada${ncPendentesDaAuditoriaActual.length ? ` com ${ncPendentesDaAuditoriaActual.length} não-conformidade(s)` : ""}.`, "sucesso");
+    if (falhasAnexos.length) {
+        erroEl.textContent = "A auditoria ficou guardada, mas estes anexos falharam: " + falhasAnexos.join("; ");
+        toast("Auditoria guardada com anexos pendentes.", "erro");
+    } else {
+        toast(`Auditoria registada${ncPendentesDaAuditoriaActual.length ? ` com ${ncPendentesDaAuditoriaActual.length} não-conformidade(s)` : ""}.`, "sucesso");
+    }
+
     ncPendentesDaAuditoriaActual = [];
     renderizarNcPendentes();
     document.getElementById("auObservacoes").value = "";
@@ -294,10 +291,7 @@ async function carregarNcParaConfirmar() {
 }
 
 async function confirmarNcResolvida(ncId) {
-    const { data: { session } } = await supabaseClient.auth.getSession();
-    const { error } = await supabaseClient.from("nao_conformidades")
-        .update({ estado: "Resolvida", confirmado_por: session.user.id, confirmado_em: new Date().toISOString() })
-        .eq("id", ncId);
+    const { error } = await supabaseClient.rpc("confirmar_resolucao_nc_r322", { p_nc: ncId });
     if (error) { toast("Erro: " + error.message, "erro"); return; }
     toast("Não-conformidade confirmada como resolvida.", "sucesso");
     carregarNcParaConfirmar();
@@ -326,7 +320,8 @@ async function carregarKpis() {
 async function carregarAuditorias() {
     const { data, error } = await supabaseClient
         .from("auditorias")
-        .select("id, tipo, data_auditoria, zonas_auditoria(nome), nao_conformidades(id)")
+        .select("id, tipo, data_auditoria, anulada_r322, zonas_auditoria(nome), nao_conformidades(id)")
+        .eq("anulada_r322", false)
         .order("data_auditoria", { ascending: false })
         .limit(30);
     if (error) { console.error(error); return; }
@@ -340,17 +335,18 @@ async function carregarAuditorias() {
             <td data-rotulo="Data">${formatarData(au.data_auditoria)}</td>
             <td data-rotulo="Zona">${escaparHtml(au.zonas_auditoria?.nome ?? "—")}</td>
             <td data-rotulo="Não-conformidades">${au.nao_conformidades?.length ?? 0}</td>
-            <td data-rotulo="Acção"><button class="secundario" onclick="apagarAuditoria('${au.id}')" style="padding:4px 10px; font-size:12px;">Apagar</button></td>
+            <td data-rotulo="Acção"><button class="secundario" onclick="anularAuditoria('${au.id}')" style="padding:4px 10px; font-size:12px;">Anular</button></td>
         `;
         corpo.appendChild(tr);
     });
 }
 
-async function apagarAuditoria(auditoriaId) {
-    if (!confirm("Apagar esta auditoria? Isto apaga também as não-conformidades ligadas a ela, sem forma de desfazer.")) return;
-    const { error } = await supabaseClient.from("auditorias").delete().eq("id", auditoriaId);
-    if (error) { toast("Erro ao apagar: " + traduzirErro(error.message), "erro"); return; }
-    toast("Auditoria apagada.", "sucesso");
+async function anularAuditoria(auditoriaId) {
+    const motivo = prompt("Motivo da anulação (o histórico será preservado):");
+    if (motivo === null) return;
+    const { error } = await supabaseClient.rpc("anular_auditoria_r322", { p_auditoria: auditoriaId, p_motivo: motivo });
+    if (error) { toast("Erro ao anular: " + traduzirErro(error.message), "erro"); return; }
+    toast("Auditoria anulada; o histórico foi preservado.", "sucesso");
     carregarAuditorias();
     carregarKpis();
 }
