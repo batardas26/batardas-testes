@@ -8,15 +8,36 @@
 <link rel="icon" href="img/logo.png" type="image/png"><link rel="stylesheet" href="css/style.css">
 </head>
 <body class="pagina-inicio">
-<aside class="ambiente-testes">BATARDAS · TESTES — R3.3-A.3</aside>
+<aside class="ambiente-testes">BATARDAS · TESTES — R3.3-A.4</aside>
 <header class="inicio-topo">
     <div class="inicio-marca"><img src="img/logo.png" alt="Batardas"><strong>Centro operacional</strong></div>
     <div><span class="utilizador" id="nomeUtilizador"></span><button class="secundario" onclick="terminarSessao()">Sair</button></div>
 </header>
 <main class="inicio-conteudo">
     <section class="inicio-boas-vindas">
-        <div><p class="inicio-data" id="dataHoje"></p><h1 id="saudacao">Bom trabalho.</h1><p>Regista o plano no início, as exceções quando acontecem e confirma os valores reais no fim do turno.</p></div>
-        <span class="badge-r3">R3.3-A.3 · TESTES</span>
+        <div><p class="inicio-data" id="dataHoje"></p><h1 id="saudacao">Cockpit operacional</h1><p>O trabalho do dia, os bloqueios e a próxima ação — numa única vista.</p></div>
+        <span class="badge-r3">R3.3-A.4 · TESTES</span>
+    </section>
+
+    <section class="inicio-fluxos-r334" aria-label="Fluxo operacional de hoje">
+        <article class="area-fluxo-r334">
+            <header><div><span class="inicio-data">Produção</span><h2>Do plano à entrega</h2></div><button onclick="abrirAreaR334('producao','cockpit')">Abrir cockpit</button></header>
+            <div class="mini-fluxo-r334">
+                <button onclick="abrirAreaR334('producao','plano')"><strong id="homeProdPlanear">—</strong><span>Planear</span></button>
+                <button onclick="abrirAreaR334('producao','producao')"><strong id="homeProdCurso">—</strong><span>Em curso</span></button>
+                <button onclick="abrirAreaR334('producao','passagens')"><strong id="homeProdEntregar">—</strong><span>Aguardar receção</span></button>
+                <button onclick="abrirAreaR334('producao','producao')"><strong id="homeProdFechado">—</strong><span>Fechados hoje</span></button>
+            </div>
+        </article>
+        <article class="area-fluxo-r334">
+            <header><div><span class="inicio-data">Armazém</span><h2>Da receção à carga</h2></div><button onclick="abrirAreaR334('armazem','cockpit')">Abrir cockpit</button></header>
+            <div class="mini-fluxo-r334">
+                <button onclick="abrirAreaR334('armazem','r3')"><strong id="homeArmReceber">—</strong><span>Por receber</span></button>
+                <button onclick="abrirAreaR334('armazem','embalamento')"><strong id="homeArmEmbalar">—</strong><span>Por embalar</span></button>
+                <button onclick="abrirAreaR334('armazem','picking')"><strong id="homeArmPicking">—</strong><span>Picking</span></button>
+                <button onclick="abrirAreaR334('armazem','picking')"><strong id="homeArmCarga">—</strong><span>Por carregar</span></button>
+            </div>
+        </article>
     </section>
 
     <section class="inicio-grelha-resumo" aria-label="Resumo operacional">
@@ -28,7 +49,7 @@
 
     <section class="inicio-duas-colunas">
         <div class="cartao">
-            <h2>Abrir módulo</h2>
+            <h2>Configuração e consulta</h2>
             <div id="modulosDisponiveis" class="grelha-modulos"></div>
         </div>
         <div class="cartao">
@@ -69,7 +90,33 @@ async function iniciarHomepage() {
     document.getElementById("dataHoje").textContent = agora.toLocaleDateString("pt-PT", {weekday:"long", day:"numeric", month:"long"});
     document.getElementById("saudacao").textContent = `${agora.getHours()<13?"Bom dia":agora.getHours()<20?"Boa tarde":"Boa noite"}, ${perfil.nome.split(" ")[0]}.`;
 
-    await Promise.all([carregarKpis(session), carregarDiaOperacional(perfil, session.user.id)]);
+    await Promise.all([carregarKpis(session), carregarDiaOperacional(perfil, session.user.id), carregarFluxoHomeR334()]);
+}
+
+function abrirAreaR334(area,secao){
+    localStorage.setItem(area==="producao"?"batardas_secao_producao_r334":"batardas_secao_armazem_r334",secao);
+    location.href=area==="producao"?"producao.html":"armazem.html";
+}
+
+async function carregarFluxoHomeR334(){
+    const hoje=new Date().toISOString().slice(0,10);
+    const [planos,passagens,embalamento,resumo,encomendas]=await Promise.all([
+        supabaseClient.from("plano_producao").select("estado_r31,data_planeada,quantidade_boa_un"),
+        supabaseClient.from("passagens_pa_r31").select("estado"),
+        supabaseClient.from("plano_embalamento").select("estado"),
+        supabaseClient.from("resumo_encomendas_r31").select("estado_operacional"),
+        supabaseClient.from("encomendas").select("estado,data_conclusao_preparacao")
+    ]);
+    const p=planos.data||[],pa=passagens.data||[],pe=embalamento.data||[],r=resumo.data||[],e=encomendas.data||[];
+    const porEstado=(lista,campo,valores)=>lista.filter(x=>valores.includes(x[campo])).length;
+    document.getElementById("homeProdPlanear").textContent=p.filter(x=>x.data_planeada===hoje&&["planeado","aprovado"].includes(x.estado_r31)).length;
+    document.getElementById("homeProdCurso").textContent=porEstado(p,"estado_r31",["em_producao"]);
+    document.getElementById("homeProdEntregar").textContent=porEstado(pa,"estado",["entregue"]);
+    document.getElementById("homeProdFechado").textContent=p.filter(x=>x.data_planeada===hoje&&x.estado_r31==="concluido").length;
+    document.getElementById("homeArmReceber").textContent=porEstado(pa,"estado",["entregue"]);
+    document.getElementById("homeArmEmbalar").textContent=porEstado(pe,"estado",["planeado"]);
+    document.getElementById("homeArmPicking").textContent=r.filter(x=>x.estado_operacional==="pronta_para_picking").length;
+    document.getElementById("homeArmCarga").textContent=e.filter(x=>x.estado==="Embalada"&&x.data_conclusao_preparacao).length;
 }
 
 function renderizarModulos(perfil, roleVisual=null) {

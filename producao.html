@@ -17,19 +17,23 @@
 <nav class="barra-lateral">
     <div class="marca"><img class="logo" src="img/logo.png" alt="Batardas" style="cursor:pointer;" onclick="irParaInicio()"></div>
     <button id="botaoMenuMobile" onclick="alternarMenuMobile()" aria-label="Menu"><i class="ti ti-menu-2" aria-hidden="true"></i></button>
-    <button class="nav-item activo" data-secao="encomendas"><i class="ti ti-package" aria-hidden="true"></i> Encomendas</button>
+    <div class="tipo-trabalho-r334">Cockpit</div>
+    <button class="nav-item activo" data-secao="cockpit"><i class="ti ti-layout-dashboard" aria-hidden="true"></i> Hoje</button>
+    <div class="tipo-trabalho-r334">Execução</div>
+    <button class="nav-item" data-secao="encomendas"><i class="ti ti-package" aria-hidden="true"></i> Encomendas</button>
     <button class="nav-item" data-secao="producao"><i class="ti ti-tools-kitchen-2" aria-hidden="true"></i> Produção diária</button>
     <button class="nav-item" data-secao="plano"><i class="ti ti-calendar-week" aria-hidden="true"></i> Plano de produção</button>
     <button class="nav-item" data-secao="passagens"><i class="ti ti-package-export" aria-hidden="true"></i> Entregar ao armazém</button>
     <button class="nav-item" data-secao="pedidos"><i class="ti ti-clipboard-list" aria-hidden="true"></i> Pedidos ao armazém</button>
     <button class="nav-item" data-secao="movimentos"><i class="ti ti-arrows-exchange" aria-hidden="true"></i> Movimentos de stock</button>
+    <div class="tipo-trabalho-r334">Apoio</div>
     <button class="nav-item" data-secao="qualidade"><i class="ti ti-clipboard-check" aria-hidden="true"></i> Qualidade</button>
     <a class="nav-item" href="modelo-artigos-lotes.html" style="text-decoration:none;"><i class="ti ti-arrows-transfer-up" aria-hidden="true"></i> Transformar lote</a>
 </nav>
 
 <div class="conteudo-admin">
 <header>
-    <h1 id="tituloSecao">Encomendas</h1>
+    <h1 id="tituloSecao">Produção · Hoje</h1>
     <div>
         <span class="utilizador" id="nomeUtilizador"></span>
         <span class="bloco-sino">
@@ -41,7 +45,30 @@
 </header>
 
 <main>
-<section class="painel activo" data-secao="encomendas">
+<section class="painel activo" data-secao="cockpit">
+    <div class="cockpit-r334">
+        <div class="cockpit-topo-r334"><div><span class="eyebrow-r334">Cockpit do responsável</span><h2>Produção · Hoje</h2><p>Prioriza o fluxo, trata os bloqueios e abre o trabalho no ponto certo.</p></div><button onclick="mudarSecao('producao')">Abrir produção diária</button></div>
+        <div class="cockpit-kpis-r334">
+            <article class="cockpit-kpi-r334"><span>Planeados hoje</span><strong id="cpProdPlaneados">—</strong><small>Aguardam início</small></article>
+            <article class="cockpit-kpi-r334"><span>Em produção</span><strong id="cpProdCurso">—</strong><small>WIP atual</small></article>
+            <article class="cockpit-kpi-r334 atencao"><span>Aguardar receção</span><strong id="cpProdRececao">—</strong><small>Entregues ao Armazém</small></article>
+            <article class="cockpit-kpi-r334"><span>Fechados hoje</span><strong id="cpProdFechados">—</strong><small>Resultado registado</small></article>
+        </div>
+        <div><h2>Fluxo do dia</h2><div class="fluxo-r334">
+            <button class="etapa-fluxo-r334" onclick="mudarSecao('plano')"><span>1 · Planear</span><strong id="flProdPlanear">—</strong><small>necessidades</small></button>
+            <button class="etapa-fluxo-r334" onclick="mudarSecao('producao')"><span>2 · Produzir</span><strong id="flProdProduzir">—</strong><small>tarefas</small></button>
+            <button class="etapa-fluxo-r334" onclick="mudarSecao('producao')"><span>3 · Fechar PA</span><strong id="flProdFechar">—</strong><small>em curso</small></button>
+            <button class="etapa-fluxo-r334" onclick="mudarSecao('passagens')"><span>4 · Entregar</span><strong id="flProdEntregar">—</strong><small>lotes disponíveis</small></button>
+            <button class="etapa-fluxo-r334" onclick="location.href='armazem.html'"><span>5 · Receção</span><strong id="flProdReceber">—</strong><small>aguardam Armazém</small></button>
+        </div></div>
+        <div class="cockpit-duas-r334">
+            <div class="cartao"><h2>Andon · atenção necessária</h2><ul class="andon-r334" id="cpProdAndon"><li><i class="ti ti-loader-2"></i><span>A analisar o fluxo…</span></li></ul></div>
+            <div class="cartao"><h2>Ações do responsável</h2><div class="atalhos-r334"><button onclick="mudarSecao('plano')">Rever plano <i class="ti ti-arrow-right"></i></button><button onclick="mudarSecao('producao')">Executar produção <i class="ti ti-arrow-right"></i></button><button onclick="mudarSecao('passagens')">Entregar PA <i class="ti ti-arrow-right"></i></button></div></div>
+        </div>
+    </div>
+</section>
+
+<section class="painel" data-secao="encomendas">
     <div class="filtros">
         <button data-estado="todos" class="filtro-activo">Todas</button>
         <button data-estado="Registada">Registadas</button>
@@ -257,6 +284,7 @@ async function iniciar() {
     await actualizarContadorMovimentosPendentesEnvio();
     await carregarProducaoDiaria();
     await carregarPassagensPaR31();
+    await carregarCockpitProducaoR334();
 
     // Actualiza sozinho quando alguém (tu, Fernando) mexer nas encomendas
     supabaseClient
@@ -270,6 +298,27 @@ async function iniciar() {
         .subscribe();
 
     carregarMinhasNcPartilhado(contexto.session.user.id);
+}
+
+async function carregarCockpitProducaoR334(){
+    const hoje=new Date().toISOString().slice(0,10);
+    const [planos,lotes,passagens,necessidades]=await Promise.all([
+        supabaseClient.from("plano_producao").select("id,estado_r31,data_planeada,quantidade_boa_un"),
+        supabaseClient.from("lotes_internos").select("id,quantidade_disponivel").eq("tipo","pa").eq("estado","disponivel_embalamento").gt("quantidade_disponivel",0),
+        supabaseClient.from("passagens_pa_r31").select("id,estado"),
+        supabaseClient.from("necessidades_producao_linha_r31").select("linha_id,quantidade_un,estado").gt("quantidade_un",0).in("estado",["pendente","parcial","planeada"])
+    ]);
+    const p=planos.data||[],l=lotes.data||[],pa=passagens.data||[],n=necessidades.data||[];
+    const planeados=p.filter(x=>x.data_planeada===hoje&&["planeado","aprovado"].includes(x.estado_r31)).length;
+    const curso=p.filter(x=>x.estado_r31==="em_producao").length;
+    const receber=pa.filter(x=>x.estado==="entregue").length;
+    const fechados=p.filter(x=>x.data_planeada===hoje&&x.estado_r31==="concluido").length;
+    [["cpProdPlaneados",planeados],["cpProdCurso",curso],["cpProdRececao",receber],["cpProdFechados",fechados],["flProdPlanear",n.length],["flProdProduzir",planeados],["flProdFechar",curso],["flProdEntregar",l.length],["flProdReceber",receber]].forEach(([id,v])=>document.getElementById(id).textContent=v);
+    const avisos=[];
+    if(receber)avisos.push(`<li><i class="ti ti-alert-triangle"></i><span><strong>${receber} entrega(s) ainda sem receção</strong><small class="texto-suave">O PA não fica disponível para embalar enquanto o Armazém não confirmar.</small></span></li>`);
+    if(curso)avisos.push(`<li><i class="ti ti-clock"></i><span><strong>${curso} produção(ões) em curso</strong><small class="texto-suave">Confirmar resultado real, lotes consumidos e quebra.</small></span></li>`);
+    if(!avisos.length)avisos.push(`<li class="ok"><i class="ti ti-circle-check"></i><span><strong>Sem bloqueios no fluxo de Produção</strong><small class="texto-suave">A próxima ação está disponível no quadro acima.</small></span></li>`);
+    document.getElementById("cpProdAndon").innerHTML=avisos.join("");
 }
 
 function aplicarPermissoesProducaoR323(perfil) {
@@ -867,14 +916,14 @@ async function carregarPassagensPaR31(){
  ]);
  if(error){document.getElementById("listaEntregasPaR31").innerHTML=`<p class="erro">${escaparHtml(traduzirErro(error.message))}</p>`;return;}
  const comprometido={};(passagens||[]).filter(p=>["entregue","recebida"].includes(p.estado)).forEach(p=>comprometido[p.lote_interno_id]=(comprometido[p.lote_interno_id]||0)+Number(p.quantidade));
- document.getElementById("listaEntregasPaR31").innerHTML=(lotes||[]).map(l=>{const restante=Math.max(0,Number(l.quantidade_disponivel)-(comprometido[l.id]||0));return `<div class="etapa-stock-r31"><strong>${escaparHtml(l.artigos?.designacao||"—")} · ${escaparHtml(l.numero_lote)}</strong><p>Disponível para nova passagem: ${restante} UN</p><div class="linha-form"><input type="number" min="0.01" max="${restante}" step="0.01" placeholder="Quantidade UN" data-qtd-entrega="${l.id}"><select data-destino-entrega="${l.id}"><option value="stock">Stock</option><option value="embalamento">Embalamento</option><option value="encomenda">Encomenda</option></select><select data-encomenda-entrega="${l.id}" disabled aria-label="Encomenda de destino"><option value="">Seleciona primeiro o destino Encomenda</option>${(encomendas||[]).map(e=>`<option value="${e.encomenda_id}">${escaparHtml(e.clientes?.nome||"—")} · ${formatarData(e.data_entrega_pretendida)}</option>`).join("")}</select><button data-entregar-pa="${l.id}" ${restante<=0?"disabled":""}>Entregar</button></div></div>`;}).join("")||'<p class="texto-suave">Sem PA congelado disponível para nova passagem.</p>';
+ document.getElementById("listaEntregasPaR31").innerHTML=(lotes||[]).map(l=>{const restante=Math.max(0,Number(l.quantidade_disponivel)-(comprometido[l.id]||0));return `<div class="etapa-stock-r31"><strong>${escaparHtml(l.artigos?.designacao||"—")} · ${escaparHtml(l.numero_lote)}</strong><p>Disponível para nova passagem: ${restante} UN</p><div class="linha-form"><input type="number" min="0.01" max="${restante}" step="0.01" placeholder="Quantidade UN" data-qtd-entrega="${l.id}"><select data-destino-entrega="${l.id}"><option value="stock">Stock</option><option value="embalamento">Embalamento</option><option value="encomenda">Encomenda</option></select><select data-encomenda-entrega="${l.id}" disabled aria-label="Encomenda de destino"><option value="">Seleciona primeiro o destino Encomenda</option>${(encomendas||[]).map(e=>`<option value="${e.encomenda_id}">${escaparHtml(e.clientes?.nome||"—")} · ${formatarData(e.data_entrega_pretendida)}</option>`).join("")}</select><button data-entregar-pa="${l.id}" ${restante<=0?"disabled":""}>Entregar</button></div><p class="erro" data-erro-entrega="${l.id}" role="alert"></p></div>`;}).join("")||'<p class="texto-suave">Sem PA congelado disponível para nova passagem.</p>';
  document.querySelectorAll("[data-destino-entrega]").forEach(campo=>campo.onchange=()=>{const id=campo.dataset.destinoEntrega,seletor=document.querySelector(`[data-encomenda-entrega="${id}"]`),usaEncomenda=campo.value==="encomenda";seletor.disabled=!usaEncomenda;if(!usaEncomenda)seletor.value="";});
- document.querySelectorAll("[data-entregar-pa]").forEach(b=>b.onclick=async()=>{const id=b.dataset.entregarPa,q=Number(document.querySelector(`[data-qtd-entrega="${id}"]`).value),destino=document.querySelector(`[data-destino-entrega="${id}"]`).value,seletorEncomenda=document.querySelector(`[data-encomenda-entrega="${id}"]`),encomenda=destino==="encomenda"?(seletorEncomenda.value||null):null;if(!q||(destino==="encomenda"&&!encomenda)){toast("Indica a quantidade e seleciona uma encomenda apenas quando esse for o destino.","erro");return;}const {error:erro}=await supabaseClient.rpc("entregar_pa_r31",{p_lote:id,p_quantidade:q,p_destino:destino,p_encomenda:encomenda,p_observacoes:null});if(erro){toast(traduzirErro(erro.message),"erro");return;}toast("PA entregue ao Armazém para confirmação.","sucesso");await carregarPassagensPaR31();});
+ document.querySelectorAll("[data-entregar-pa]").forEach(b=>b.onclick=async()=>{const id=b.dataset.entregarPa,campoQuantidade=document.querySelector(`[data-qtd-entrega="${id}"]`),q=Number(campoQuantidade.value),max=Number(campoQuantidade.max),destino=document.querySelector(`[data-destino-entrega="${id}"]`).value,seletorEncomenda=document.querySelector(`[data-encomenda-entrega="${id}"]`),encomenda=destino==="encomenda"?(seletorEncomenda.value||null):null,erroLocal=document.querySelector(`[data-erro-entrega="${id}"]`);erroLocal.textContent="";if(!(q>0)||q>max||(destino==="encomenda"&&!encomenda)){const mensagem=q>max?`Só estão disponíveis ${max} UN para nova passagem.`:"Indica uma quantidade válida e seleciona a encomenda quando esse for o destino.";erroLocal.textContent=mensagem;toast(mensagem,"erro");return;}b.disabled=true;const {error:erro}=await supabaseClient.rpc("entregar_pa_r31",{p_lote:id,p_quantidade:q,p_destino:destino,p_encomenda:encomenda,p_observacoes:null});b.disabled=false;if(erro){const mensagem=traduzirErro(erro.message);erroLocal.textContent=mensagem;toast(mensagem,"erro");return;}toast("PA entregue ao Armazém para confirmação.","sucesso");await Promise.all([carregarPassagensPaR31(),carregarCockpitProducaoR334()]);});
  document.getElementById("historicoEntregasPaR31").innerHTML=(passagens||[]).map(p=>`<p><strong>${escaparHtml(p.lotes_internos?.numero_lote||"—")}</strong> · ${p.quantidade} UN · ${escaparHtml(p.destino)} · ${escaparHtml(p.estado)}${p.quantidade_recebida!=null?` · recebido ${p.quantidade_recebida} UN`:""}</p>`).join("")||'<p class="texto-suave">Sem passagens.</p>';
 }
 
 const TITULOS_SECAO = {
-    encomendas: "Encomendas", producao: "Produção diária", plano: "Plano de produção",
+    cockpit:"Produção · Hoje", encomendas: "Encomendas", producao: "Produção diária", plano: "Plano de produção",
     passagens:"Entregar ao armazém", pedidos: "Pedidos ao armazém", movimentos: "Movimentos de stock", qualidade: "Qualidade",
 };
 
@@ -882,12 +931,12 @@ function mudarSecao(secao) {
     document.querySelectorAll(".nav-item").forEach((btn) => btn.classList.toggle("activo", btn.dataset.secao === secao));
     document.querySelectorAll(".painel").forEach((p) => p.classList.toggle("activo", p.dataset.secao === secao));
     document.getElementById("tituloSecao").textContent = TITULOS_SECAO[secao] ?? "Encomendas";
-    localStorage.setItem("batardas_secao_nuno", secao);
+    localStorage.setItem("batardas_secao_producao_r334", secao);
 }
 document.querySelectorAll(".nav-item").forEach((btn) => {
     btn.addEventListener("click", () => mudarSecao(btn.dataset.secao));
 });
-mudarSecao(localStorage.getItem("batardas_secao_nuno") ?? "encomendas");
+mudarSecao(localStorage.getItem("batardas_secao_producao_r334") ?? "cockpit");
 
 iniciar();
 </script>
