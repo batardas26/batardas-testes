@@ -1227,13 +1227,18 @@ document.getElementById("btnExportarPlanoEmbalamento").addEventListener("click",
 });
 
 async function carregarReservasEmbalarR31(){
-    const {data,error}=await supabaseClient.from("reservas_linha_encomenda_r31").select("id,quantidade_stock,quantidade_interna_un,lote_interno_id,lotes_internos(numero_lote),linhas_encomenda(produto,encomendas(data_entrega_pretendida,clientes(nome)))").eq("tipo","por_embalar").eq("estado","ativa").order("criada_em");
+    const [{data,error},{data:rececoes,error:erroRececoes}]=await Promise.all([
+      supabaseClient.from("reservas_linha_encomenda_r31").select("id,quantidade_stock,quantidade_interna_un,lote_interno_id,lotes_internos(numero_lote),linhas_encomenda(produto,encomenda_id,encomendas(data_entrega_pretendida,clientes(nome)))").eq("tipo","por_embalar").eq("estado","ativa").order("criada_em"),
+      supabaseClient.from("passagens_pa_r31").select("lote_interno_id,encomenda_id,quantidade,quantidade_recebida").eq("estado","recebida").eq("destino","encomenda")
+    ]);
     const corpo=document.getElementById("corpoReservasEmbalarR31");if(!corpo)return;
-    if(error){corpo.innerHTML=`<tr><td colspan="4" class="erro">${escaparHtml(traduzirErro(error.message))}</td></tr>`;return;}
-    const ids=(data||[]).map(r=>r.id);let planeadas=new Set();
+    if(error||erroRececoes){corpo.innerHTML=`<tr><td colspan="4" class="erro">${escaparHtml(traduzirErro((error||erroRececoes).message))}</td></tr>`;return;}
+    const recebidaPorLoteEncomenda={};(rececoes||[]).forEach(p=>{const k=`${p.lote_interno_id}|${p.encomenda_id}`;recebidaPorLoteEncomenda[k]=(recebidaPorLoteEncomenda[k]||0)+Number(p.quantidade_recebida??p.quantidade);});
+    const disponiveis=(data||[]).filter(r=>Number(recebidaPorLoteEncomenda[`${r.lote_interno_id}|${r.linhas_encomenda?.encomenda_id}`]||0)>=Number(r.quantidade_interna_un));
+    const ids=disponiveis.map(r=>r.id);let planeadas=new Set();
     if(ids.length){const {data:p}=await supabaseClient.from("plano_embalamento").select("reserva_origem_id").in("reserva_origem_id",ids).eq("estado","planeado");planeadas=new Set((p||[]).map(x=>x.reserva_origem_id));}
-    corpo.innerHTML=data?.length?"":'<tr><td colspan="4">Sem PA reservado para encomendas.</td></tr>';
-    (data||[]).forEach(r=>{const l=r.linhas_encomenda,e=l?.encomendas;const tr=document.createElement("tr");tr.innerHTML=`<td><strong>${escaparHtml(e?.clientes?.nome||"—")}</strong><small>${escaparHtml(l?.produto||"—")} · entrega ${formatarData(e?.data_entrega_pretendida)}</small></td><td class="mono">${escaparHtml(r.lotes_internos?.numero_lote||"—")}</td><td>${r.quantidade_interna_un} UN</td><td>${planeadas.has(r.id)?'<span class="badge Em-Preparacao">Já planeado</span>':`<button data-planear-reserva="${r.id}">Adicionar ao plano</button>`}</td>`;corpo.appendChild(tr);});
+    corpo.innerHTML=disponiveis.length?"":'<tr><td colspan="4">Sem PA reservado recebido e disponível para encomendas.</td></tr>';
+    disponiveis.forEach(r=>{const l=r.linhas_encomenda,e=l?.encomendas;const tr=document.createElement("tr");tr.innerHTML=`<td><strong>${escaparHtml(e?.clientes?.nome||"—")}</strong><small>${escaparHtml(l?.produto||"—")} · entrega ${formatarData(e?.data_entrega_pretendida)}</small></td><td class="mono">${escaparHtml(r.lotes_internos?.numero_lote||"—")}</td><td>${r.quantidade_interna_un} UN</td><td>${planeadas.has(r.id)?'<span class="badge Em-Preparacao">Já planeado</span>':`<button data-planear-reserva="${r.id}">Adicionar ao plano</button>`}</td>`;corpo.appendChild(tr);});
     corpo.querySelectorAll("[data-planear-reserva]").forEach(b=>b.onclick=async()=>{const {error}=await supabaseClient.rpc("criar_plano_embalamento_reserva_r31",{p_reserva:b.dataset.planearReserva,p_data:document.getElementById("peData").value});if(error){toast(traduzirErro(error.message),"erro");return;}toast("Reserva adicionada ao plano de embalamento.","sucesso");await carregarReservasEmbalarR31();await carregarPlanoEmbalamentoDoDia();});
 }
 
