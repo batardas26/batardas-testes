@@ -8,7 +8,7 @@
 <link rel="icon" href="img/logo.png" type="image/png"><link rel="stylesheet" href="css/style.css">
 </head>
 <body class="pagina-inicio">
-<aside class="ambiente-testes">BATARDAS · TESTES — R3.3-A.4</aside>
+<aside class="ambiente-testes">BATARDAS · TESTES — R3.3-A.4.1</aside>
 <header class="inicio-topo">
     <div class="inicio-marca"><img src="img/logo.png" alt="Batardas"><strong>Centro operacional</strong></div>
     <div><span class="utilizador" id="nomeUtilizador"></span><button class="secundario" onclick="terminarSessao()">Sair</button></div>
@@ -16,7 +16,7 @@
 <main class="inicio-conteudo">
     <section class="inicio-boas-vindas">
         <div><p class="inicio-data" id="dataHoje"></p><h1 id="saudacao">Cockpit operacional</h1><p>O trabalho do dia, os bloqueios e a próxima ação — numa única vista.</p></div>
-        <span class="badge-r3">R3.3-A.4 · TESTES</span>
+        <span class="badge-r3">R3.3-A.4.1 · TESTES</span>
     </section>
 
     <section class="inicio-fluxos-r334" aria-label="Fluxo operacional de hoje">
@@ -35,7 +35,7 @@
                 <button onclick="abrirAreaR334('armazem','r3')"><strong id="homeArmReceber">—</strong><span>Por receber</span></button>
                 <button onclick="abrirAreaR334('armazem','embalamento')"><strong id="homeArmEmbalar">—</strong><span>Por embalar</span></button>
                 <button onclick="abrirAreaR334('armazem','picking')"><strong id="homeArmPicking">—</strong><span>Picking</span></button>
-                <button onclick="abrirAreaR334('armazem','picking')"><strong id="homeArmCarga">—</strong><span>Por carregar</span></button>
+                <button onclick="abrirAreaR334('armazem','picking','secaoCargaR334')"><strong id="homeArmCarga">—</strong><span>Por carregar</span></button>
             </div>
         </article>
     </section>
@@ -93,8 +93,9 @@ async function iniciarHomepage() {
     await Promise.all([carregarKpis(session), carregarDiaOperacional(perfil, session.user.id), carregarFluxoHomeR334()]);
 }
 
-function abrirAreaR334(area,secao){
+function abrirAreaR334(area,secao,foco=null){
     localStorage.setItem(area==="producao"?"batardas_secao_producao_r334":"batardas_secao_armazem_r334",secao);
+    if(foco)sessionStorage.setItem("batardas_foco_r334",foco);else sessionStorage.removeItem("batardas_foco_r334");
     location.href=area==="producao"?"producao.html":"armazem.html";
 }
 

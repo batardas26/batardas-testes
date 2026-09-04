@@ -105,7 +105,7 @@
         </table>
     </div>
 
-    <div class="cartao">
+    <div class="cartao" id="secaoCargaR334">
         <h2>Prontas para carregar</h2>
         <p class="texto-suave">Só aparecem depois do embalamento e do picking. Confirmar a carga regista a saída operacional para Admin e Consulta; não imprime etiquetas nem cria um movimento de stock adicional.</p>
         <table>
@@ -730,6 +730,8 @@ document.querySelectorAll(".nav-item").forEach((btn) => {
     btn.addEventListener("click", () => mudarSecao(btn.dataset.secao));
 });
 mudarSecao(localStorage.getItem("batardas_secao_armazem_r334") ?? "cockpit");
+const focoInicialR334=sessionStorage.getItem("batardas_foco_r334");
+if(focoInicialR334){sessionStorage.removeItem("batardas_foco_r334");setTimeout(()=>document.getElementById(focoInicialR334)?.scrollIntoView({block:"start"}),0);}
 
 // --- Zonas de armazém --------------------------------------------------
 async function carregarListaZonas() {
