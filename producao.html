@@ -730,7 +730,40 @@ async function abrirAfetacaoPaProduzido(item){
     fundo.querySelector("#apCancelar").onclick=(evento)=>{evento.preventDefault();fundo.remove();};
     fundo.addEventListener("click",evento=>{if(evento.target===fundo)fundo.remove();});
     fundo.addEventListener("keydown",evento=>{if(evento.key==="Escape")fundo.remove();});
-    fundo.querySelector("#apConfirmar").onclick=async()=>{const q=Number(fundo.querySelector("#apQuantidade").value)||0,quebra=Number(fundo.querySelector("#apQuebra").value)||0,motivo=fundo.querySelector("#apMotivo").value.trim(),motivoDiferenca=fundo.querySelector("#apMotivoDiferenca").value.trim();const consumos=[...fundo.querySelectorAll("[data-origem-id]:checked")].map(c=>({lote_id:c.dataset.origemId,componente_id:c.dataset.origemArtigo,componente_previsto_id:c.dataset.origemArtigo,origem:c.dataset.origemTipo,unidade:c.dataset.origemUnidade,quantidade:Number(fundo.querySelector(`[data-origem-q="${c.dataset.origemId}"]`).value),substituicao:false}));if(consumos.some(o=>!o.quantidade)){fundo.querySelector("#apErro").textContent="Indica a quantidade de cada lote selecionado.";return;}const botao=fundo.querySelector("#apConfirmar");botao.disabled=true;const {data:novoLote,error:erro}=await supabaseClient.rpc("concluir_producao_r32",{p_plano:item.id,p_quantidade_boa_un:q,p_quebra_un:quebra,p_motivo_quebra:motivo||null,p_consumos:consumos,p_localizacao:fundo.querySelector("#apLocal").value||null,p_validade:fundo.querySelector("#apValidade").value||null,p_motivo_diferenca:motivoDiferenca||null});if(erro){fundo.querySelector("#apErro").textContent=traduzirErro(erro.message);botao.disabled=false;return;}fundo.remove();toast(q>0?`Produção concluída e novo lote interno ${novoLote} criado.`:"Perda total registada sem criar stock fictício.","sucesso");await carregarProducaoDiaria();await carregarNecessidadesEncomendasR31();};
+    fundo.querySelector("#apConfirmar").onclick=async()=>{
+      const erroEl=fundo.querySelector("#apErro"),botao=fundo.querySelector("#apConfirmar");
+      erroEl.textContent="";
+      try{
+        const q=Number(fundo.querySelector("#apQuantidade").value)||0;
+        const quebra=Number(fundo.querySelector("#apQuebra").value)||0;
+        const motivo=fundo.querySelector("#apMotivo").value.trim();
+        const motivoDiferenca=fundo.querySelector("#apMotivoDiferenca").value.trim();
+        const consumos=[...fundo.querySelectorAll("[data-origem-id]:checked")].map(c=>{
+          const linha=c.closest(".origem-producao-r313");
+          const quantidadeEl=linha?.querySelector("input[type=number]");
+          if(!quantidadeEl)throw new Error("CAMPO_QUANTIDADE_CONSUMO_NAO_ENCONTRADO");
+          return {lote_id:c.dataset.origemId,componente_id:c.dataset.origemArtigo,
+            componente_previsto_id:c.dataset.origemArtigo,origem:c.dataset.origemTipo,
+            unidade:c.dataset.origemUnidade,quantidade:Number(quantidadeEl.value),substituicao:false};
+        });
+        if(consumos.some(o=>!Number.isFinite(o.quantidade)||o.quantidade<=0)){
+          erroEl.textContent="Indica uma quantidade superior a zero em cada lote selecionado.";return;
+        }
+        botao.disabled=true;
+        const {data:novoLote,error:erro}=await supabaseClient.rpc("concluir_producao_r32",{
+          p_plano:item.id,p_quantidade_boa_un:q,p_quebra_un:quebra,p_motivo_quebra:motivo||null,
+          p_consumos:consumos,p_localizacao:fundo.querySelector("#apLocal").value||null,
+          p_validade:fundo.querySelector("#apValidade").value||null,p_motivo_diferenca:motivoDiferenca||null
+        });
+        if(erro)throw erro;
+        fundo.remove();
+        toast(q>0?`Produção concluída e novo lote interno ${novoLote} criado.`:"Perda total registada sem criar stock fictício.","sucesso");
+        await carregarProducaoDiaria();await carregarNecessidadesEncomendasR31();
+      }catch(erro){
+        erroEl.textContent=traduzirErro(erro?.message||"Não foi possível concluir a produção.");
+        botao.disabled=false;
+      }
+    };
 }
 
 async function registarProducaoIntermedio(item, div) {
