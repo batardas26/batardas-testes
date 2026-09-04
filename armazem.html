@@ -22,6 +22,7 @@
     <div class="tipo-trabalho-r334">Execução</div>
     <button class="nav-item" data-secao="encomendas"><i class="ti ti-shopping-cart" aria-hidden="true"></i> Encomendas</button>
     <button class="nav-item" data-secao="picking"><i class="ti ti-clipboard-check" aria-hidden="true"></i> Picking</button>
+    <button class="nav-item" data-secao="carga"><i class="ti ti-truck-loading" aria-hidden="true"></i> Carga</button>
     <button class="nav-item" data-secao="embalamento"><i class="ti ti-package" aria-hidden="true"></i> Embalamento <span class="contador" id="contadorEmbalamento" style="display:none;"></span></button>
     <button class="nav-item" data-secao="pedidos"><i class="ti ti-clipboard-list" aria-hidden="true"></i> Pedidos <span class="contador" id="contadorPedidos" style="display:none;"></span></button>
     <button class="nav-item" data-secao="movimentos"><i class="ti ti-arrows-exchange" aria-hidden="true"></i> Movimentos de stock</button>
@@ -58,18 +59,18 @@
       <button class="cockpit-kpi-r334" onclick="mudarSecao('r3')"><span>A receber</span><strong id="cpArmReceber">—</strong><small>passagens de PA</small></button>
       <button class="cockpit-kpi-r334" onclick="mudarSecao('embalamento')"><span>A embalar</span><strong id="cpArmEmbalar">—</strong><small>linhas planeadas</small></button>
       <button class="cockpit-kpi-r334" onclick="mudarSecao('picking')"><span>Para picking</span><strong id="cpArmPicking">—</strong><small>encomendas prontas</small></button>
-      <button class="cockpit-kpi-r334" onclick="mudarSecao('picking')"><span>Para carga</span><strong id="cpArmCarga">—</strong><small>encomendas preparadas</small></button>
+      <button class="cockpit-kpi-r334" onclick="mudarSecao('carga')"><span>Para carga</span><strong id="cpArmCarga">—</strong><small>encomendas preparadas</small></button>
     </div>
     <div class="fluxo-r334" aria-label="Fluxo do armazém">
       <button class="etapa-fluxo-r334" onclick="mudarSecao('r3')"><span>1 · Receber</span><strong id="flArmReceber">—</strong><small>passagens</small></button>
       <button class="etapa-fluxo-r334" onclick="mudarSecao('embalamento')"><span>2 · Embalar</span><strong id="flArmEmbalar">—</strong><small>linhas</small></button>
       <button class="etapa-fluxo-r334" onclick="mudarSecao('r3')"><span>3 · Fechar caixas</span><strong id="flArmCaixas">—</strong><small>caixas fechadas</small></button>
       <button class="etapa-fluxo-r334" onclick="mudarSecao('picking')"><span>4 · Picking</span><strong id="flArmPicking">—</strong><small>encomendas</small></button>
-      <button class="etapa-fluxo-r334" onclick="mudarSecao('picking')"><span>5 · Carga</span><strong id="flArmCarga">—</strong><small>preparadas</small></button>
+      <button class="etapa-fluxo-r334" onclick="mudarSecao('carga')"><span>5 · Carga</span><strong id="flArmCarga">—</strong><small>preparadas</small></button>
     </div>
     <div class="cockpit-duas-r334">
       <div class="cartao"><h2>Andon · atenção necessária</h2><ul class="andon-r334" id="cpArmAndon"><li class="ok"><i class="ti ti-loader-2"></i><span>A analisar o fluxo…</span></li></ul></div>
-      <div class="cartao"><h2>Ações rápidas</h2><div class="atalhos-r334"><button onclick="mudarSecao('r3')">Confirmar receções <i class="ti ti-arrow-right"></i></button><button onclick="mudarSecao('embalamento')">Abrir embalamento <i class="ti ti-arrow-right"></i></button><button onclick="mudarSecao('picking')">Preparar carga <i class="ti ti-arrow-right"></i></button></div></div>
+      <div class="cartao"><h2>Ações rápidas</h2><div class="atalhos-r334"><button onclick="mudarSecao('r3')">Confirmar receções <i class="ti ti-arrow-right"></i></button><button onclick="mudarSecao('embalamento')">Abrir embalamento <i class="ti ti-arrow-right"></i></button><button onclick="mudarSecao('carga')">Preparar carga <i class="ti ti-arrow-right"></i></button></div></div>
     </div>
   </div>
 </section>
@@ -105,6 +106,8 @@
         </table>
     </div>
 
+</section>
+<section class="painel" data-secao="carga">
     <div class="cartao" id="secaoCargaR334">
         <h2>Prontas para carregar</h2>
         <p class="texto-suave">Só aparecem depois do embalamento e do picking. Confirmar a carga regista a saída operacional para Admin e Consulta; não imprime etiquetas nem cria um movimento de stock adicional.</p>
@@ -113,6 +116,8 @@
             <tbody id="corpoProntasCarregar"></tbody>
         </table>
     </div>
+</section>
+<section class="painel" data-secao="picking">
     <div class="cartao">
         <h2>Paletização das encomendas</h2>
         <p class="texto-suave">As linhas da encomenda mantêm-se separadas. Aqui podes criar várias paletes e colocar caixas de artigos diferentes na mesma palete.</p>
@@ -718,7 +723,7 @@ function renderizarEncomendasR31(){
  const lista=filtroEncomendasR31==="Todas"?encomendasR31:encomendasR31.filter(e=>e.estado===filtroEncomendasR31);document.getElementById("corpoEncomendasR31").innerHTML=lista.map(e=>{const rota=(e.rotaR31?.estado_operacional||"por_analisar").replaceAll("_"," ");return `<tr><td>${escaparHtml(e.clientes?.nome||"—")}</td><td>${formatarData(e.data_entrega_pretendida)}</td><td><span class="badge ${CLASSE_ESTADO[e.estado]||""}">${escaparHtml(formatarEstadoEncomenda(e.estado))}</span></td><td><strong>${escaparHtml(rota)}</strong><small>${e.rotaR31?`${e.rotaR31.linhas_prontas}/${e.rotaR31.total_linhas} linhas prontas`:""}</small></td></tr>`;}).join("")||'<tr><td colspan="4" class="texto-suave">Sem encomendas neste estado.</td></tr>';
 }
 
-const TITULOS_SECAO = { cockpit:"Armazém · Hoje", encomendas:"Encomendas", picking: "Picking", embalamento: "Embalamento", pedidos: "Pedidos de armazém", movimentos: "Movimentos de stock", zonas: "Stock & Zonas", etiquetas:"Etiquetas", r3: "Fluxo interno R3", inventario: "Inventário", qualidade: "Qualidade" };
+const TITULOS_SECAO = { cockpit:"Armazém · Hoje", encomendas:"Encomendas", picking:"Picking", carga:"Carga", embalamento:"Embalamento", pedidos:"Pedidos de armazém", movimentos:"Movimentos de stock", zonas:"Stock & Zonas", etiquetas:"Etiquetas", r3:"Fluxo interno R3", inventario:"Inventário", qualidade:"Qualidade" };
 
 function mudarSecao(secao) {
     document.querySelectorAll(".nav-item").forEach((btn) => btn.classList.toggle("activo", btn.dataset.secao === secao));

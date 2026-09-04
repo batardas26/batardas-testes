@@ -125,7 +125,7 @@
                 <div id="ppArtigoResultados" class="lista-sugestoes" style="display:none;"></div>
             </div>
             <input id="ppQuantidade" type="number" min="0.01" step="0.01" placeholder="Quantidade planeada">
-            <select id="ppUnidade" aria-label="Unidade da quantidade planeada"><option value="un">UN</option><option value="pack">PCK</option><option value="kg">KG</option><option value="g">G</option><option value="l">L</option><option value="ml">ML</option><option value="mil">MIL</option><option value="caixa">Caixa</option><option value="palete">Palete</option></select>
+            <select id="ppUnidade" aria-label="Unidade da quantidade planeada" disabled><option value="">Escolhe primeiro o artigo</option></select>
         </div>
         <button id="btnAdicionarPlano">Adicionar ao plano</button>
         <table style="margin-top:16px;">
@@ -274,7 +274,7 @@ async function iniciar() {
     await inicializarAlertas();
     await carregar();
     await activarPesquisaArtigo("fArtigoTexto", "fArtigo", "fArtigoResultados", carregarLotesDisponiveisParaPedido);
-    await activarPesquisaArtigo("ppArtigoTexto", "ppArtigo", "ppArtigoResultados");
+    await activarPesquisaArtigo("ppArtigoTexto", "ppArtigo", "ppArtigoResultados", configurarUnidadesPlanoR3342);
     await activarPesquisaArtigo("mArtigoTexto", "mArtigo", "mArtigoResultados", (artigoId) => carregarLotesDoArtigo(artigoId, "mLoteOrigem"));
     await activarPesquisaArtigo("mArtigoTextoDestino", "mArtigoDestino", "mArtigoDestinoResultados", (artigoId) => carregarLotesDoArtigo(artigoId, "mLoteDestino"));
     await carregarPedidos();
@@ -826,6 +826,15 @@ async function removerDoPlano(id) {
 
 document.getElementById("ppData").addEventListener("change", carregarPlanoDoDia);
 
+function configurarUnidadesPlanoR3342(artigoId,artigo){
+    const select=document.getElementById("ppUnidade");
+    const base=(artigo?.unidade_stock||"un").toLowerCase();
+    const opcoes=opcoesUnidadePara(base).map(o=>({valor:o.valor,rotulo:o.rotulo}));
+    if(base==="un"&&Number(artigo?.unidades_produto_por_stock)>1)opcoes.push({valor:"pack",rotulo:"PCK"});
+    select.innerHTML=opcoes.map(o=>`<option value="${o.valor}">${o.rotulo}</option>`).join("");
+    select.disabled=false;
+}
+
 document.getElementById("btnAdicionarPlano").addEventListener("click", async () => {
     const artigoId = document.getElementById("ppArtigo").value;
     const quantidade = Number(document.getElementById("ppQuantidade").value);
@@ -841,6 +850,8 @@ document.getElementById("btnAdicionarPlano").addEventListener("click", async () 
     document.getElementById("ppQuantidade").value = "";
     document.getElementById("ppArtigoTexto").value = "";
     document.getElementById("ppArtigo").value = "";
+    document.getElementById("ppUnidade").innerHTML = '<option value="">Escolhe primeiro o artigo</option>';
+    document.getElementById("ppUnidade").disabled = true;
     carregarPlanoDoDia();
 });
 

@@ -2244,16 +2244,22 @@ async function carregarReceitaExistente(produtoId) {
     document.getElementById("rRendimento").value = 1;
     if (!produtoId) { renderizarReceitaAtual(); return; }
 
+    const { data: bom } = await supabaseClient
+        .from("bom_versoes_r32")
+        .select("id, quantidade_referencia, unidade_referencia")
+        .eq("produto_id", produtoId).eq("estado", "ativa").maybeSingle();
+    if (!bom) { renderizarReceitaAtual(); return; }
+    document.getElementById("rRendimento").value = Number(bom.quantidade_referencia);
     const { data } = await supabaseClient
-        .from("bom_componentes")
-        .select("componente_id, quantidade_por_unidade, componente:componente_id(designacao, unidade)")
-        .eq("produto_id", produtoId);
+        .from("bom_componentes_r32")
+        .select("componente_id, quantidade, unidade, componente:componente_id(designacao, unidade_stock)")
+        .eq("bom_versao_id", bom.id).order("ordem");
 
     receitaAtual = (data ?? []).map((l) => ({
         componente_id: l.componente_id,
         designacao: l.componente?.designacao ?? "—",
-        unidade_base: (l.componente?.unidade ?? "un").toUpperCase(),
-        racio: Number(l.quantidade_por_unidade),
+        unidade_base: (l.unidade ?? l.componente?.unidade_stock ?? "un").toUpperCase(),
+        racio: Number(l.quantidade) / Number(bom.quantidade_referencia),
     }));
     renderizarReceitaAtual();
 }
@@ -2344,15 +2350,21 @@ document.getElementById("btnGuardarReceita").addEventListener("click", async () 
     if (!produtoId) { erroEl.textContent = "Escolhe o produto final."; return; }
     if (!receitaAtual.length) { erroEl.textContent = "Adiciona pelo menos uma matéria-prima."; return; }
 
-    // Substitui a receita toda — mais simples e sem risco de linhas
-    // órfãs do que tentar calcular inserções/remoções em cima da anterior.
-    const { error: erroApagar } = await supabaseClient.from("bom_componentes").delete().eq("produto_id", produtoId);
-    if (erroApagar) { erroEl.textContent = "Erro ao guardar: " + erroApagar.message; return; }
-
-    const { error: erroInserir } = await supabaseClient.from("bom_componentes").insert(
-        receitaAtual.map((l) => ({ produto_id: produtoId, componente_id: l.componente_id, quantidade_por_unidade: l.racio }))
-    );
-    if (erroInserir) { erroEl.textContent = "Erro ao guardar: " + erroInserir.message; return; }
+    const rendimento = Number(document.getElementById("rRendimento").value);
+    const artigo = await obterArtigoPorId(produtoId);
+    const componentes = receitaAtual.map((l) => ({
+        componente_id: l.componente_id,
+        quantidade: l.racio * rendimento,
+        unidade: l.unidade_base.toLowerCase(),
+    }));
+    const { error: erroInserir } = await supabaseClient.rpc("guardar_bom_canonica_r3342", {
+        p_produto: produtoId,
+        p_quantidade_referencia: rendimento,
+        p_unidade_referencia: artigo?.unidade_stock ?? "un",
+        p_componentes: componentes,
+        p_nome: null,
+    });
+    if (erroInserir) { erroEl.textContent = "Erro ao guardar: " + traduzirErro(erroInserir.message); return; }
 
     toast("Receita guardada.", "sucesso");
     document.getElementById("rProdutoTexto").value = "";
@@ -2368,8 +2380,8 @@ document.getElementById("btnEliminarReceita").addEventListener("click", async ()
     if (!produtoId) return;
     if (!confirm("Eliminar a receita toda deste produto? Não há desfazer.")) return;
 
-    const { error } = await supabaseClient.from("bom_componentes").delete().eq("produto_id", produtoId);
-    if (error) { document.getElementById("erroReceita").textContent = "Erro ao eliminar: " + error.message; return; }
+    const { error } = await supabaseClient.rpc("inativar_bom_canonica_r3342", { p_produto: produtoId });
+    if (error) { document.getElementById("erroReceita").textContent = "Erro ao eliminar: " + traduzirErro(error.message); return; }
 
     toast("Receita eliminada.", "sucesso");
     document.getElementById("rProdutoTexto").value = "";
@@ -2382,16 +2394,17 @@ document.getElementById("btnEliminarReceita").addEventListener("click", async ()
 
 async function carregarListaReceitas() {
     const { data, error } = await supabaseClient
-        .from("bom_componentes")
-        .select("produto_id, produto:produto_id(designacao)");
+        .from("bom_versoes_r32")
+        .select("produto_id, produto:produto_id(designacao), componentes:bom_componentes_r32(id)")
+        .eq("estado", "ativa");
     if (error) { console.error(error); return; }
 
     const contagemPorProduto = {};
     (data ?? []).forEach((l) => {
-        if (!contagemPorProduto[l.produto_id]) {
-            contagemPorProduto[l.produto_id] = { designacao: l.produto?.designacao ?? "—", total: 0 };
-        }
-        contagemPorProduto[l.produto_id].total += 1;
+        contagemPorProduto[l.produto_id] = {
+            designacao: l.produto?.designacao ?? "—",
+            total: (l.componentes ?? []).length,
+        };
     });
 
     const corpo = document.getElementById("corpoListaReceitas");
