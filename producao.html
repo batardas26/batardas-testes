@@ -829,8 +829,11 @@ document.getElementById("ppData").addEventListener("change", carregarPlanoDoDia)
 function configurarUnidadesPlanoR3342(artigoId,artigo){
     const select=document.getElementById("ppUnidade");
     const base=(artigo?.unidade_stock||"un").toLowerCase();
-    const opcoes=opcoesUnidadePara(base).map(o=>({valor:o.valor,rotulo:o.rotulo}));
-    if(base==="un"&&Number(artigo?.unidades_produto_por_stock)>1)opcoes.push({valor:"pack",rotulo:"PCK"});
+    const opcoes=opcoesUnidadePara(base).map(o=>({valor:o.valor,rotulo:o.valor==="pack"?"PCK":o.rotulo}));
+    if(Number(artigo?.unidades_produto_por_stock)>1){
+      if(!opcoes.some(o=>o.valor==="un"))opcoes.push({valor:"un",rotulo:"UN"});
+      if(!opcoes.some(o=>o.valor==="pack"))opcoes.push({valor:"pack",rotulo:"PCK"});
+    }
     select.innerHTML=opcoes.map(o=>`<option value="${o.valor}">${o.rotulo}</option>`).join("");
     select.disabled=false;
 }
@@ -921,7 +924,7 @@ document.getElementById("btnPedirEmFalta").addEventListener("click", async () =>
 
 async function carregarPassagensPaR31(){
  const [{data:lotes,error},{data:passagens},{data:encomendas}]=await Promise.all([
-  supabaseClient.from("lotes_internos").select("id,numero_lote,quantidade_produzida,quantidade_disponivel,artigos(designacao)").eq("tipo","pa").eq("estado","disponivel_embalamento").gt("quantidade_disponivel",0),
+  supabaseClient.rpc("listar_pa_entrega_r3343"),
   supabaseClient.from("passagens_pa_r31").select("id,lote_interno_id,quantidade,quantidade_recebida,destino,estado,entregue_em,lotes_internos(numero_lote,artigos(designacao))").order("entregue_em",{ascending:false}).limit(30),
   supabaseClient.from("encomendas").select("encomenda_id,clientes(nome),data_entrega_pretendida").in("estado",["Registada","Em Produção","Em Preparação","Pronta"])
  ]);
