@@ -1514,7 +1514,7 @@ async function guardarEdicaoMovimento(movimentoId) {
 }
 
 async function marcarMovimentoRegistado(movimentoId) {
-    if (!confirm("Confirmas que já passaste isto para o Primavera? Marcar como registado não tem desfazer no site.")) return;
+    if (!(await confirmarAcao({titulo:"Registar no Primavera",mensagem:"Confirma que este movimento já foi passado para o Primavera. Esta marcação não pode ser anulada na aplicação.",confirmar:"Marcar como registado"}))) return;
     const { data: { session } } = await supabaseClient.auth.getSession();
     const { error } = await supabaseClient
         .from("movimentos_stock")
@@ -1582,9 +1582,9 @@ async function carregar() {
 }
 
 async function cancelarEncomenda(encomendaId) {
-    const motivo = prompt("Motivo do cancelamento (fica registado):");
-    if (motivo === null) return; // carregou em "Cancelar" da caixa do browser, desistiu
-    if (!confirm("Cancelar esta encomenda? Se já tinha lote atribuído, a quantidade volta ao lote comercial automaticamente.")) return;
+    const motivo = await pedirTextoAcao({titulo:"Cancelar encomenda",mensagem:"O motivo fica registado no histórico.",etiqueta:"Motivo do cancelamento",confirmar:"Continuar"});
+    if (motivo === null) return;
+    if (!(await confirmarAcao({titulo:"Confirmar cancelamento",mensagem:"As reservas existentes serão libertadas automaticamente.",confirmar:"Cancelar encomenda",perigo:true}))) return;
 
     const { error } = await supabaseClient.rpc("cancelar_encomenda_r322", {
         p_encomenda: encomendaId, p_motivo: motivo,
@@ -1959,7 +1959,7 @@ document.getElementById("btnGuardarPermissoesR31").addEventListener("click",asyn
 });
 
 async function reporPassword(userId, nome) {
-    if (!confirm(`Repor a password de ${nome}? A password antiga deixa de funcionar de imediato.`)) return;
+    if (!(await confirmarAcao({titulo:"Repor password",mensagem:`A password atual de ${nome} deixa de funcionar imediatamente.`,confirmar:"Repor password",perigo:true}))) return;
     const resultado = await chamarGestaoUtilizadores({ acao: "repor_password", userId });
     if (resultado.error) { toast("Erro: " + resultado.error, "erro"); return; }
     mostrarModalPassword(`Nova password de ${nome}`, resultado.password);
@@ -2378,7 +2378,7 @@ document.getElementById("btnGuardarReceita").addEventListener("click", async () 
 document.getElementById("btnEliminarReceita").addEventListener("click", async () => {
     const produtoId = document.getElementById("rProduto").value;
     if (!produtoId) return;
-    if (!confirm("Eliminar a receita toda deste produto? Não há desfazer.")) return;
+    if (!(await confirmarAcao({titulo:"Inativar receita",mensagem:"A receita ativa deste produto será inativada. O histórico mantém-se.",confirmar:"Inativar receita",perigo:true}))) return;
 
     const { error } = await supabaseClient.rpc("inativar_bom_canonica_r3342", { p_produto: produtoId });
     if (error) { document.getElementById("erroReceita").textContent = "Erro ao eliminar: " + traduzirErro(error.message); return; }

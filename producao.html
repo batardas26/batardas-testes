@@ -946,7 +946,7 @@ document.getElementById("btnExportarNecessidades").addEventListener("click", asy
 document.getElementById("btnPedirEmFalta").addEventListener("click", async () => {
     const emFalta = ultimasNecessidades.filter((n) => n.em_falta > 0);
     if (!emFalta.length) { toast("Não há nada em falta neste momento.", "info"); return; }
-    if (!confirm(`Vai criar ${emFalta.length} pedido(s) ao armazém, um por cada matéria-prima em falta. Confirmas?`)) return;
+    if (!(await confirmarAcao({titulo:"Criar pedidos ao Armazém",mensagem:`Serão criados ${emFalta.length} pedidos, um por cada matéria-prima em falta.`,confirmar:"Criar pedidos"}))) return;
 
     const pedidos = emFalta.map((n) => ({ artigo_id: n.artigo_id, quantidade: n.em_falta }));
     const { error } = await supabaseClient.from("pedidos_armazem").insert(pedidos);

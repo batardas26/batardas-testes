@@ -342,7 +342,7 @@ async function carregarAuditorias() {
 }
 
 async function anularAuditoria(auditoriaId) {
-    const motivo = prompt("Motivo da anulação (o histórico será preservado):");
+    const motivo = await pedirTextoAcao({titulo:"Anular auditoria",mensagem:"O registo mantém-se no histórico.",etiqueta:"Motivo da anulação",confirmar:"Anular auditoria"});
     if (motivo === null) return;
     const { error } = await supabaseClient.rpc("anular_auditoria_r322", { p_auditoria: auditoriaId, p_motivo: motivo });
     if (error) { toast("Erro ao anular: " + traduzirErro(error.message), "erro"); return; }

@@ -110,10 +110,16 @@
 <section class="painel" data-secao="carga">
     <div class="cartao" id="secaoCargaR334">
         <h2>Prontas para carregar</h2>
-        <p class="texto-suave">Só aparecem depois do embalamento e do picking. Confirmar a carga regista a saída operacional para Admin e Consulta; não imprime etiquetas nem cria um movimento de stock adicional.</p>
         <table>
             <thead><tr><th>Cliente</th><th>Entrega</th><th>Acção</th></tr></thead>
             <tbody id="corpoProntasCarregar"></tbody>
+        </table>
+    </div>
+    <div class="cartao">
+        <h2>Preparação da carga</h2>
+        <table>
+            <thead><tr><th>Cliente</th><th>Entrega</th><th>Falta concluir</th><th>Acção</th></tr></thead>
+            <tbody id="corpoPreparacaoCarga"></tbody>
         </table>
     </div>
 </section>
@@ -428,23 +434,23 @@ async function iniciar() {
 }
 
 async function carregarCockpitArmazemR334(){
-    const [passagens,plano,resumos,encomendas,caixas]=await Promise.all([
+    const [passagens,plano,resumos,cargas,caixas]=await Promise.all([
         supabaseClient.from("passagens_pa_r31").select("id,estado"),
         supabaseClient.from("plano_embalamento").select("id,estado"),
         supabaseClient.from("resumo_encomendas_r31").select("encomenda_id,estado_operacional"),
-        supabaseClient.from("encomendas").select("encomenda_id,estado,data_conclusao_preparacao"),
+        supabaseClient.rpc("avaliar_cargas_r3344"),
         supabaseClient.from("unidades_logisticas").select("id,estado").eq("tipo","caixa")
     ]);
-    const resultados=[passagens,plano,resumos,encomendas,caixas];
+    const resultados=[passagens,plano,resumos,cargas,caixas];
     if(resultados.some(r=>r.error)){
         console.error("Não foi possível atualizar o cockpit do Armazém.",resultados.find(r=>r.error)?.error);
         return;
     }
-    const p=passagens.data||[],pl=plano.data||[],r=resumos.data||[],e=encomendas.data||[],c=caixas.data||[];
+    const p=passagens.data||[],pl=plano.data||[],r=resumos.data||[],cg=cargas.data||[],c=caixas.data||[];
     const receber=p.filter(x=>x.estado==="entregue").length;
     const embalar=pl.filter(x=>x.estado==="planeado").length;
     const picking=r.filter(x=>x.estado_operacional==="pronta_para_picking").length;
-    const carga=e.filter(x=>x.estado==="Embalada"&&x.data_conclusao_preparacao).length;
+    const carga=cg.filter(x=>x.elegivel===true).length;
     const fechadas=c.filter(x=>x.estado==="fechada").length;
     [["cpArmReceber",receber],["cpArmEmbalar",embalar],["cpArmPicking",picking],["cpArmCarga",carga],["flArmReceber",receber],["flArmEmbalar",embalar],["flArmCaixas",fechadas],["flArmPicking",picking],["flArmCarga",carga]].forEach(([id,v])=>document.getElementById(id).textContent=v);
     const alvo=document.getElementById("cpArmAndon");
@@ -556,7 +562,7 @@ async function carregarPedidosPendentes() {
 }
 
 async function atenderPedido(pedidoId) {
-    if (!confirm("Marcar este pedido como atendido? Não há forma de desfazer no site depois.")) return;
+    if (!(await confirmarAcao({titulo:"Concluir pedido",mensagem:"Confirma que o pedido foi atendido.",confirmar:"Marcar como atendido"}))) return;
     const { data: { session } } = await supabaseClient.auth.getSession();
     const { error } = await supabaseClient
         .from("pedidos_armazem")
@@ -675,14 +681,23 @@ async function carregar() {
         corpoHist.appendChild(tr);
     });
 
-    const { data: prontasCarregar, error: erro3 } = await supabaseClient
+    const [{ data: candidatasCarga, error: erro3 }, { data: avaliacoesCarga, error: erro4 }] = await Promise.all([supabaseClient
         .from("encomendas")
         .select("encomenda_id, data_entrega_pretendida, clientes(nome), linhas_encomenda(linha_id)")
         .in("estado", ["Pronta", "Embalada"])
         .not("data_conclusao_preparacao", "is", null)
-        .order("data_entrega_pretendida", { ascending: true });
+        .order("data_entrega_pretendida", { ascending: true }),supabaseClient.rpc("avaliar_cargas_r3344")]);
     const corpoCarga = document.getElementById("corpoProntasCarregar");
-    if (erro3) { console.error(erro3); return; }
+    const corpoPreparacao = document.getElementById("corpoPreparacaoCarga");
+    if (erro3 || erro4) {
+        const mensagem=escaparHtml(traduzirErro((erro3||erro4).message));
+        corpoCarga.innerHTML=`<tr><td colspan="3" class="erro">${mensagem}</td></tr>`;
+        corpoPreparacao.innerHTML=`<tr><td colspan="4" class="erro">${mensagem}</td></tr>`;
+        return;
+    }
+    const mapaAvaliacao=Object.fromEntries((avaliacoesCarga||[]).map(a=>[a.encomenda_id,a]));
+    const prontasCarregar=(candidatasCarga||[]).filter(e=>mapaAvaliacao[e.encomenda_id]?.elegivel===true);
+    const emPreparacao=(candidatasCarga||[]).filter(e=>mapaAvaliacao[e.encomenda_id]?.elegivel!==true);
     corpoCarga.innerHTML = prontasCarregar.length ? "" :
         `<tr><td colspan="3" style="text-align:center; color:var(--ink-suave);">Nada pronto para carregar.</td></tr>`;
     prontasCarregar.forEach((enc) => {
@@ -694,6 +709,31 @@ async function carregar() {
         `;
         corpoCarga.appendChild(tr);
     });
+    corpoPreparacao.innerHTML=emPreparacao.length?"":
+        `<tr><td colspan="4" style="text-align:center; color:var(--ink-suave);">Sem cargas por concluir.</td></tr>`;
+    const textoBloqueio={
+        ENCOMENDA_SEM_PALETE_FECHADA:"Falta fechar a palete",
+        EXISTEM_PALETES_ABERTAS:"Existem paletes por fechar",
+        CONTEUDO_FISICO_NAO_COINCIDE_COM_AS_RESERVAS:"Conteúdo da palete não corresponde à reserva",
+        STOCK_COMERCIAL_INSUFICIENTE_OU_EXPIRADO_NA_CARGA:"Reserva sem stock válido"
+    };
+    emPreparacao.forEach(enc=>{
+        const avaliacao=mapaAvaliacao[enc.encomenda_id]??{};
+        const motivo=avaliacao.motivo;
+        const divergencias=Array.isArray(avaliacao.detalhe)?avaliacao.detalhe:[];
+        const detalhe=divergencias.map(d=>`<small>${escaparHtml(d.artigo)} · lote ${escaparHtml(d.lote)}: reserva ${escaparHtml(d.reservado)} ${escaparHtml(formatarUnidadeStock(d.unidade))} · palete ${escaparHtml(d.fisico)} ${escaparHtml(formatarUnidadeStock(d.unidade))}</small>`).join("");
+        const tr=document.createElement("tr");
+        tr.innerHTML=`
+            <td data-rotulo="Cliente">${escaparHtml(enc.clientes?.nome??"—")}</td>
+            <td data-rotulo="Entrega">${formatarData(enc.data_entrega_pretendida)}</td>
+            <td data-rotulo="Falta concluir"><strong>${escaparHtml(textoBloqueio[motivo]??"Preparação incompleta")}</strong>${detalhe}</td>
+            <td data-rotulo="Acção"><button class="secundario" data-preparar-carga>Abrir paletização</button></td>`;
+        tr.querySelector("[data-preparar-carga]").addEventListener("click",()=>{
+            mudarSecao("picking");
+            abrirGestorPaletizacaoR31(enc.encomenda_id,enc.clientes?.nome??"—");
+        });
+        corpoPreparacao.appendChild(tr);
+    });
 }
 
 async function marcarPronta(encomendaId) {
@@ -704,7 +744,7 @@ async function marcarPronta(encomendaId) {
 }
 
 async function marcarCarregadaArmazem(encomendaId) {
-    if (!confirm("Confirmas que esta encomenda foi fisicamente carregada?")) return;
+    if (!(await confirmarAcao({titulo:"Confirmar carga",mensagem:"Confirma que a encomenda foi fisicamente carregada no veículo.",confirmar:"Confirmar carregamento"}))) return;
     const { error } = await supabaseClient.rpc("carregar_encomenda_r31",{p_encomenda:encomendaId,p_carregado_em:new Date().toISOString()});
     if (error) { toast("Erro ao confirmar carregamento: " + traduzirErro(error.message), "erro"); return; }
     await carregar();
@@ -1013,7 +1053,7 @@ document.getElementById("btnExportarPdfInventario").addEventListener("click", as
 
 document.getElementById("btnConcluirInventario").addEventListener("click", async () => {
     const naoContados = itensInventarioActual.filter((i) => !i.contado);
-    if (naoContados.length && !confirm(`${naoContados.length} item(ns) ainda sem contagem escrita. Confirmas que queres concluir mesmo assim?`)) return;
+    if (naoContados.length && !(await confirmarAcao({titulo:"Concluir inventário",mensagem:`Existem ${naoContados.length} artigos sem contagem registada.`,confirmar:"Concluir mesmo assim",perigo:true}))) return;
 
     const { error } = await supabaseClient.from("inventarios")
         .update({ estado: "Concluído pelo armazém", concluido_em: new Date().toISOString() })
@@ -1125,7 +1165,7 @@ async function carregarPlanoEmbalamentoDoDia() {
     if (!dataPlano) return;
     const { data, error } = await supabaseClient
         .from("plano_embalamento")
-        .select("id, quantidade, quantidade_introduzida, unidade_introduzida, unidade_base, fator_aplicado, estado, quantidade_planeada_un_r32, packs_previstos_r32, remanescente_previsto_un_r32, lotes_producao(numero_lote, produto), lotes_internos(id, artigo_id, numero_lote, artigos(artigo_id, designacao))")
+        .select("id, quantidade, quantidade_introduzida, unidade_introduzida, unidade_base, fator_aplicado, estado, quantidade_planeada_un_r32, packs_previstos_r32, remanescente_previsto_un_r32, lotes_producao(numero_lote, produto), lotes_internos(id, artigo_id, numero_lote, artigos(artigo_id, designacao, unidade_stock))")
         .eq("data_planeada", dataPlano)
         .eq("estado", "planeado")
         .order("criado_em", { ascending: true });
@@ -1136,10 +1176,12 @@ async function carregarPlanoEmbalamentoDoDia() {
     corpo.innerHTML = data.length ? "" : `<tr><td colspan="4" style="text-align:center; color:var(--ink-suave);">Nada planeado para este dia.</td></tr>`;
     data.forEach((item) => {
         const tr = document.createElement("tr");
+        const artigoEmPack=item.lotes_internos?.artigos?.unidade_stock==="pack";
+        const decomposicao=artigoEmPack&&item.packs_previstos_r32!=null?` → ${item.packs_previstos_r32} PCK completos${Number(item.remanescente_previsto_un_r32)>0?` + ${item.remanescente_previsto_un_r32} UN remanescentes`:""}`:"";
         tr.innerHTML = `
             <td data-rotulo="Produto">${escaparHtml(item.lotes_internos?.artigos?.designacao ?? item.lotes_producao?.produto ?? "—")}</td>
             <td data-rotulo="Lote" class="mono">${escaparHtml(item.lotes_internos?.numero_lote ?? item.lotes_producao?.numero_lote ?? "—")}</td>
-            <td data-rotulo="Quantidade">${item.quantidade_planeada_un_r32??item.quantidade} UN${item.packs_previstos_r32!=null?` → ${item.packs_previstos_r32} PCK completos${Number(item.remanescente_previsto_un_r32)>0?` + ${item.remanescente_previsto_un_r32} UN remanescentes`:""}`:""}</td>
+            <td data-rotulo="Quantidade">${item.quantidade_planeada_un_r32??item.quantidade} UN${decomposicao}</td>
             <td data-rotulo="Acção"><div class="linha-form"><button data-confirmar-plano="${item.id}" style="padding:6px 10px; font-size:12px;">Confirmar embalamento</button><button class="secundario" data-cancelar-plano="${item.id}" style="padding:6px 10px; font-size:12px;">Cancelar</button></div></td>
         `;
         tr.querySelector("[data-confirmar-plano]").addEventListener("click", () => abrirConfirmacaoPlanoEmbalamento(item));
@@ -1205,7 +1247,7 @@ async function abrirConfirmacaoPlanoEmbalamento(item) {
 }
 
 async function removerDoPlanoEmbalamento(id) {
-    if(!confirm("Cancelar esta linha do plano? O stock não será alterado."))return;
+    if(!(await confirmarAcao({titulo:"Retirar do plano",mensagem:"A linha será cancelada sem alterar o stock.",confirmar:"Retirar do plano",perigo:true})))return;
     const { error } = await supabaseClient.rpc("cancelar_plano_embalamento_r31",{p_plano:id});
     if (error) { toast("Erro ao cancelar: " + traduzirErro(error.message), "erro"); return; }
     toast("Linha cancelada sem alterar stock.","sucesso");
@@ -1246,7 +1288,7 @@ function renderModelosEtiquetaR32(){const enc=encomendasEtiquetaR32.find(x=>x.en
 function renderModelosEtiquetaPaleteR32(){const pal=document.getElementById("etPalete").selectedOptions[0],enc=encomendasEtiquetaR32.find(x=>x.encomenda_id===pal?.dataset.encomenda),lista=modelosEtiquetaR32.filter(x=>x.tipo==='gs1_128'&&(!x.cliente_id||x.cliente_id===enc?.cliente_id));document.getElementById("etModeloPalete").innerHTML='<option value="">Modelo GS1-128…</option>'+lista.sort((a,b)=>Number(Boolean(b.cliente_id))-Number(Boolean(a.cliente_id))).map(x=>`<option value="${x.id}">${escaparHtml(x.nome)}${x.cliente_id?' · cliente':' · geral'}</option>`).join('');}
 document.getElementById("btnCriarEtiquetasCaixa").onclick=async()=>{const enc=document.getElementById("etEncomenda").value,mod=document.getElementById("etModeloCaixa").value,q=Number(document.getElementById("etQuantidadeCaixas").value);if(!enc||!mod||!(q>0)){document.getElementById("etErro").textContent="Escolhe encomenda, modelo e número de caixas.";return;}const {error}=await supabaseClient.rpc("criar_lote_etiquetas_caixa_r32",{p_encomenda:enc,p_modelo:mod,p_quantidade_caixas:q,p_dados:{gerado_na_app:true}});if(error){document.getElementById("etErro").textContent=traduzirErro(error.message);return;}toast(`${q*3} etiquetas preparadas (${q} caixas × 3).`,"sucesso");await carregarEtiquetasR32();};
 document.getElementById("btnCriarEtiquetasPalete").onclick=async()=>{const pal=document.getElementById("etPalete").value,mod=document.getElementById("etModeloPalete").value;if(!pal||!mod){document.getElementById("etErro").textContent="Escolhe a palete e o modelo GS1-128.";return;}const {error}=await supabaseClient.rpc("criar_lote_etiquetas_palete_r32",{p_palete:pal,p_modelo:mod});if(error){document.getElementById("etErro").textContent=traduzirErro(error.message);return;}toast("2 etiquetas GS1-128 preparadas.","sucesso");await carregarEtiquetasR32();};
-function renderLotesImpressaoR32(lista){const alvo=document.getElementById("listaLotesImpressaoR32");alvo.innerHTML=lista.length?lista.map(x=>`<article class="etapa-stock-r31"><strong>${escaparHtml(x.modelos_etiqueta_r32?.nome||x.tipo)} · ${escaparHtml(x.encomendas?.clientes?.nome||"Sem encomenda")}</strong><p>${x.quantidade_contentores} contentores × ${x.etiquetas_por_contentor} = ${x.total_etiquetas} etiquetas · ${escaparHtml(x.estado)}</p><div class="linha-form"><button data-descarregar-zpl="${x.id}">Descarregar ZPL</button>${x.tipo==='caixa'?`<input type="number" min="1" max="${x.quantidade_contentores}" placeholder="Caixa inicial" data-reinicio="${x.id}"><input type="number" min="1" max="${x.quantidade_contentores}" placeholder="Caixa final" data-refim="${x.id}"><button class="secundario" data-reimprimir="${x.id}">Reimprimir intervalo</button>`:""}</div></article>`).join(''):'<p class="texto-suave">Ainda sem lotes de impressão.</p>';alvo.querySelectorAll("[data-descarregar-zpl]").forEach(b=>b.onclick=()=>descarregarZplR32(b.dataset.descarregarZpl,lista));alvo.querySelectorAll("[data-reimprimir]").forEach(b=>b.onclick=async()=>{const id=b.dataset.reimprimir,ini=Number(alvo.querySelector(`[data-reinicio="${id}"]`).value),fim=Number(alvo.querySelector(`[data-refim="${id}"]`).value),motivo=prompt("Motivo da reimpressão (ex.: fim do rolo):");if(!motivo)return;const {data,error}=await supabaseClient.rpc("marcar_reimpressao_caixas_r32",{p_lote:id,p_caixa_inicio:ini,p_caixa_fim:fim,p_motivo:motivo});if(error){toast(traduzirErro(error.message),"erro");return;}toast(`${data} etiquetas recolocadas na fila.`,"sucesso");await carregarEtiquetasR32();});}
+function renderLotesImpressaoR32(lista){const alvo=document.getElementById("listaLotesImpressaoR32");alvo.innerHTML=lista.length?lista.map(x=>`<article class="etapa-stock-r31"><strong>${escaparHtml(x.modelos_etiqueta_r32?.nome||x.tipo)} · ${escaparHtml(x.encomendas?.clientes?.nome||"Sem encomenda")}</strong><p>${x.quantidade_contentores} contentores × ${x.etiquetas_por_contentor} = ${x.total_etiquetas} etiquetas · ${escaparHtml(x.estado)}</p><div class="linha-form"><button data-descarregar-zpl="${x.id}">Descarregar ZPL</button>${x.tipo==='caixa'?`<input type="number" min="1" max="${x.quantidade_contentores}" placeholder="Caixa inicial" data-reinicio="${x.id}"><input type="number" min="1" max="${x.quantidade_contentores}" placeholder="Caixa final" data-refim="${x.id}"><button class="secundario" data-reimprimir="${x.id}">Reimprimir intervalo</button>`:""}</div></article>`).join(''):'<p class="texto-suave">Ainda sem lotes de impressão.</p>';alvo.querySelectorAll("[data-descarregar-zpl]").forEach(b=>b.onclick=()=>descarregarZplR32(b.dataset.descarregarZpl,lista));alvo.querySelectorAll("[data-reimprimir]").forEach(b=>b.onclick=async()=>{const id=b.dataset.reimprimir,ini=Number(alvo.querySelector(`[data-reinicio="${id}"]`).value),fim=Number(alvo.querySelector(`[data-refim="${id}"]`).value),motivo=await pedirTextoAcao({titulo:"Reimprimir etiquetas",mensagem:"O motivo fica associado à reimpressão.",etiqueta:"Motivo da reimpressão",confirmar:"Reimprimir"});if(motivo===null)return;const {data,error}=await supabaseClient.rpc("marcar_reimpressao_caixas_r32",{p_lote:id,p_caixa_inicio:ini,p_caixa_fim:fim,p_motivo:motivo});if(error){toast(traduzirErro(error.message),"erro");return;}toast(`${data} etiquetas recolocadas na fila.`,"sucesso");await carregarEtiquetasR32();});}
 async function descarregarZplR32(id,lista){const lote=lista.find(x=>x.id===id);if(!lote)return;const {data:itens,error}=await supabaseClient.from("itens_impressao_r32").select("numero_contentor,codigo_contentor,copia,estado").eq("lote_impressao_id",id).eq("estado","por_imprimir").order("numero_contentor").order("copia");if(error)return toast(traduzirErro(error.message),"erro");const dados=lote.dados||{},sub=(z,k,v)=>z.replaceAll(`{{${k}}}`,String(v??''));let zpl='';for(const i of itens||[]){let e=lote.modelos_etiqueta_r32.zpl;e=sub(e,'NUMERO_CAIXA',i.numero_contentor);e=sub(e,'COPIA',i.copia);e=sub(e,'SSCC',i.codigo_contentor||dados.sscc||'');for(const [k,v] of Object.entries(dados))e=sub(e,k.toUpperCase(),v);zpl+=e.trim()+"\n";}const url=URL.createObjectURL(new Blob([zpl],{type:'text/plain;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download=`etiquetas-${id}.zpl`;a.click();URL.revokeObjectURL(url);}
 
 async function carregarFluxoR3() {
@@ -1271,7 +1313,7 @@ async function abrirDetalheCaixaR32(caixaId){
     const fundo=document.createElement("div");fundo.className="modal-r31";
     fundo.innerHTML=`<div class="cartao modal-r31-conteudo"><h2>Caixa ${escaparHtml(caixa.codigo)}</h2><p>Estado: <strong>${escaparHtml(caixa.estado)}</strong> · remanescente ${caixa.quantidade_conteudo} ${formatarUnidadeStock(caixa.unidade_conteudo)}</p><div>${(conteudos||[]).map(c=>`<article class="etapa-stock-r31"><strong>${escaparHtml(c.artigos?.designacao||"—")}</strong><p>Lote ${escaparHtml(c.lotes_comerciais?.numero_lote||"—")} · validade ${formatarData(c.validade)} · ${c.quantidade_restante} de ${c.quantidade_inicial} ${formatarUnidadeStock(c.unidade)}</p>${caixa.estado==="aberta"&&c.quantidade_restante>0?`<div class="linha-form"><input type="number" min="0.000001" max="${c.quantidade_restante}" step="any" placeholder="Quantidade a retirar" data-retirar-conteudo="${c.id}"><button data-confirmar-retirada="${c.id}">Retirar</button></div>`:""}</article>`).join("")||'<p class="texto-suave">Sem detalhe interno. Executa novamente a migration 19 para converter caixas antigas.</p>'}</div><p id="erroCaixaR32" class="erro"></p><div class="linha-form">${caixa.estado==="fechada"?'<button id="abrirCaixaR32">Abrir caixa</button>':''}<button class="secundario" id="fecharDetalheCaixaR32">Fechar</button></div></div>`;
     document.body.appendChild(fundo);fundo.querySelector("#fecharDetalheCaixaR32").onclick=()=>fundo.remove();
-    fundo.querySelector("#abrirCaixaR32")?.addEventListener("click",async()=>{const motivo=prompt("Motivo da abertura (opcional):")||null;const {error:e}=await supabaseClient.rpc("abrir_caixa_r32",{p_caixa:caixaId,p_motivo:motivo});if(e){fundo.querySelector("#erroCaixaR32").textContent=traduzirErro(e.message);return;}fundo.remove();await carregarFluxoR3();await abrirDetalheCaixaR32(caixaId);});
+    fundo.querySelector("#abrirCaixaR32")?.addEventListener("click",async()=>{const motivo=await pedirTextoAcao({titulo:"Abrir caixa",mensagem:"A abertura fica registada. O motivo é opcional.",etiqueta:"Motivo",confirmar:"Abrir caixa",obrigatorio:false});if(motivo===null)return;const {error:e}=await supabaseClient.rpc("abrir_caixa_r32",{p_caixa:caixaId,p_motivo:motivo||null});if(e){fundo.querySelector("#erroCaixaR32").textContent=traduzirErro(e.message);return;}fundo.remove();await carregarFluxoR3();await abrirDetalheCaixaR32(caixaId);});
     fundo.querySelectorAll("[data-confirmar-retirada]").forEach(b=>b.onclick=async()=>{const id=b.dataset.confirmarRetirada,q=Number(fundo.querySelector(`[data-retirar-conteudo="${id}"]`).value);if(!(q>0)){fundo.querySelector("#erroCaixaR32").textContent="Indica a quantidade a retirar.";return;}const {error:e}=await supabaseClient.rpc("retirar_caixa_aberta_r32",{p_conteudo:id,p_quantidade:q,p_encomenda:null,p_motivo:"Retirada operacional de caixa aberta"});if(e){fundo.querySelector("#erroCaixaR32").textContent=traduzirErro(e.message);return;}fundo.remove();await carregarFluxoR3();await abrirDetalheCaixaR32(caixaId);});
 }
 
