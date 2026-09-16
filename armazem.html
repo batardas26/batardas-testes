@@ -1165,7 +1165,7 @@ async function carregarPlanoEmbalamentoDoDia() {
     if (!dataPlano) return;
     const { data, error } = await supabaseClient
         .from("plano_embalamento")
-        .select("id, quantidade, quantidade_introduzida, unidade_introduzida, unidade_base, fator_aplicado, estado, quantidade_planeada_un_r32, packs_previstos_r32, remanescente_previsto_un_r32, lotes_producao(numero_lote, produto), lotes_internos(id, artigo_id, numero_lote, artigos(artigo_id, designacao, unidade_stock))")
+        .select("id, quantidade, quantidade_introduzida, unidade_introduzida, unidade_base, fator_aplicado, estado, quantidade_planeada_un_r32, packs_previstos_r32, remanescente_previsto_un_r32, lotes_producao(numero_lote, produto), lotes_internos(id, artigo_id, numero_lote, artigos(artigo_id, designacao, unidade_stock, unidades_produto_por_stock))")
         .eq("data_planeada", dataPlano)
         .eq("estado", "planeado")
         .order("criado_em", { ascending: true });
@@ -1176,8 +1176,8 @@ async function carregarPlanoEmbalamentoDoDia() {
     corpo.innerHTML = data.length ? "" : `<tr><td colspan="4" style="text-align:center; color:var(--ink-suave);">Nada planeado para este dia.</td></tr>`;
     data.forEach((item) => {
         const tr = document.createElement("tr");
-        const artigoEmPack=item.lotes_internos?.artigos?.unidade_stock==="pack";
-        const decomposicao=artigoEmPack&&item.packs_previstos_r32!=null?` → ${item.packs_previstos_r32} PCK completos${Number(item.remanescente_previsto_un_r32)>0?` + ${item.remanescente_previsto_un_r32} UN remanescentes`:""}`:"";
+        const artigoEmPack=Number(item.lotes_internos?.artigos?.unidades_produto_por_stock)>1;
+        const decomposicao=artigoEmPack&&item.packs_previstos_r32!=null?` → ${item.packs_previstos_r32} PCK${Number(item.remanescente_previsto_un_r32)>0?` + ${item.remanescente_previsto_un_r32} UN`:""}`:"";
         tr.innerHTML = `
             <td data-rotulo="Produto">${escaparHtml(item.lotes_internos?.artigos?.designacao ?? item.lotes_producao?.produto ?? "—")}</td>
             <td data-rotulo="Lote" class="mono">${escaparHtml(item.lotes_internos?.numero_lote ?? item.lotes_producao?.numero_lote ?? "—")}</td>
@@ -1367,11 +1367,13 @@ async function carregarPaletizacaoEncomendasR31(){
 
 async function abrirGestorPaletizacaoR31(encomendaId,nomeCliente){
     encomendaPaletizacaoAtualR31=encomendaId;const gestor=document.getElementById("gestorPaletizacaoR31");gestor.style.display="block";
-    const [{data:linhas},{data:paletes},{data:reservas}]=await Promise.all([
+    const [{data:linhas,error:erroLinhas},{data:paletes,error:erroPaletes},{data:reservas,error:erroReservas},{data:caixasEmPaletes,error:erroCaixasEmPaletes}]=await Promise.all([
       supabaseClient.from("linhas_encomenda").select("linha_id,produto,artigo_id").eq("encomenda_id",encomendaId).order("ordem"),
       supabaseClient.from("paletes_encomenda_r31").select("id,codigo,sscc,estado,palete_caixas_r31(caixa_id,quantidade_stock,linhas_encomenda(produto),unidades_logisticas(codigo))").eq("encomenda_id",encomendaId).order("criada_em"),
       supabaseClient.from("reservas_linha_encomenda_r31").select("linha_id,lote_comercial_id").in("linha_id",(await supabaseClient.from("linhas_encomenda").select("linha_id").eq("encomenda_id",encomendaId)).data?.map(x=>x.linha_id)||[]).eq("tipo","comercial").in("estado",["ativa","separada"]),
+      supabaseClient.from("palete_caixas_r31").select("caixa_id"),
     ]);
+    if(erroLinhas||erroPaletes||erroReservas||erroCaixasEmPaletes){gestor.innerHTML=`<p class="erro">${escaparHtml(traduzirErro((erroLinhas||erroPaletes||erroReservas||erroCaixasEmPaletes).message))}</p>`;return;}
     const lotes=[...new Set((reservas||[]).map(r=>r.lote_comercial_id))];let caixas=[];
     if(lotes.length){
       const {data,error:erroCaixas}=await supabaseClient.from("unidades_logisticas")
@@ -1381,11 +1383,13 @@ async function abrirGestorPaletizacaoR31(encomendaId,nomeCliente){
       caixas=(data||[]).filter(c=>!c.encomenda_id_r32||c.encomenda_id_r32===encomendaId)
         .filter(c=>(c.conteudos_caixa_r32||[]).some(x=>lotes.includes(x.lote_comercial_id)&&x.quantidade_restante>0));
     }
-    const usadas=new Set((paletes||[]).flatMap(p=>(p.palete_caixas_r31||[]).map(c=>c.caixa_id)));caixas=caixas.filter(c=>!usadas.has(c.id));
-    gestor.innerHTML=`<h3>Paletização — ${escaparHtml(nomeCliente)}</h3><p class="texto-suave">Escolhe uma caixa completa ou multiproduto. A app valida todos os artigos e lotes e gera o SSCC ao fechar.</p><div class="linha-form"><input id="plCodigo" placeholder="Código interno da palete"><button id="plCriar">Criar palete</button></div><div>${(paletes||[]).map(p=>`<article class="etapa-stock-r31"><strong>${escaparHtml(p.codigo)}</strong> · ${escaparHtml(p.estado)}${p.sscc?` · SSCC ${escaparHtml(p.sscc)}`:""}<ul>${(p.palete_caixas_r31||[]).map(c=>`<li>${escaparHtml(c.unidades_logisticas?.codigo||"—")} · ${c.quantidade_stock}</li>`).join("")}</ul>${p.estado==="aberta"?`<button data-fechar-palete="${p.id}">Fechar palete e gerar SSCC</button>`:""}</article>`).join("")||'<p class="texto-suave">Ainda sem paletes.</p>'}</div>${(paletes||[]).some(p=>p.estado==="aberta")&&caixas.length?`<div class="linha-form" style="margin-top:12px"><select id="plPalete">${paletes.filter(p=>p.estado==="aberta").map(p=>`<option value="${p.id}">${escaparHtml(p.codigo)}</option>`).join("")}</select><select id="plCaixa">${caixas.map(c=>`<option value="${c.id}">${escaparHtml(c.codigo)} · ${c.quantidade_conteudo} ${formatarUnidadeStock(c.unidade_conteudo)}</option>`).join("")}</select><button id="plAdicionarCaixa">Adicionar caixa</button></div>`:""}<p id="plErro" class="erro"></p>`;
+    const usadas=new Set((caixasEmPaletes||[]).map(c=>c.caixa_id));caixas=caixas.filter(c=>!usadas.has(c.id));
+    const paletesAtivas=(paletes||[]).filter(p=>p.estado!=="cancelada");
+    gestor.innerHTML=`<h3>Paletização — ${escaparHtml(nomeCliente)}</h3><div class="linha-form"><input id="plCodigo" placeholder="Código interno da palete"><button id="plCriar">Criar palete</button></div><div>${paletesAtivas.map(p=>`<article class="etapa-stock-r31"><strong>${escaparHtml(p.codigo)}</strong> · ${escaparHtml(p.estado)}${p.sscc?` · SSCC ${escaparHtml(p.sscc)}`:""}<ul>${(p.palete_caixas_r31||[]).map(c=>`<li>${escaparHtml(c.unidades_logisticas?.codigo||"—")} · ${c.quantidade_stock}</li>`).join("")}</ul>${p.estado==="aberta"?`<div class="linha-form"><button data-fechar-palete="${p.id}">Fechar palete e gerar SSCC</button>${(p.palete_caixas_r31||[]).length===0?`<button class="secundario" data-cancelar-palete="${p.id}" data-codigo-palete="${escaparHtml(p.codigo)}">Cancelar palete</button>`:""}</div>`:""}</article>`).join("")||'<p class="texto-suave">Ainda sem paletes.</p>'}</div>${paletesAtivas.some(p=>p.estado==="aberta")&&caixas.length?`<div class="linha-form" style="margin-top:12px"><select id="plPalete">${paletesAtivas.filter(p=>p.estado==="aberta").map(p=>`<option value="${p.id}">${escaparHtml(p.codigo)}</option>`).join("")}</select><select id="plCaixa">${caixas.map(c=>`<option value="${c.id}">${escaparHtml(c.codigo)} · ${c.quantidade_conteudo} ${formatarUnidadeStock(c.unidade_conteudo)}</option>`).join("")}</select><button id="plAdicionarCaixa">Adicionar caixa</button></div>`:""}<p id="plErro" class="erro"></p>`;
     gestor.querySelector("#plCriar").onclick=async()=>{const {error}=await supabaseClient.rpc("criar_palete_encomenda_r31",{p_encomenda:encomendaId,p_codigo:gestor.querySelector("#plCodigo").value,p_sscc:null});if(error){gestor.querySelector("#plErro").textContent=traduzirErro(error.message);return;}await abrirGestorPaletizacaoR31(encomendaId,nomeCliente);};
     gestor.querySelector("#plAdicionarCaixa")?.addEventListener("click",async()=>{const {error}=await supabaseClient.rpc("adicionar_caixa_palete_r322",{p_palete:gestor.querySelector("#plPalete").value,p_caixa:gestor.querySelector("#plCaixa").value});if(error){gestor.querySelector("#plErro").textContent=traduzirErro(error.message);return;}await abrirGestorPaletizacaoR31(encomendaId,nomeCliente);});
     gestor.querySelectorAll("[data-fechar-palete]").forEach(b=>b.onclick=async()=>{const {data:sscc,error}=await supabaseClient.rpc("fechar_palete_r32",{p_palete:b.dataset.fecharPalete});if(error){gestor.querySelector("#plErro").textContent=traduzirErro(error.message);return;}toast(`Palete fechada · SSCC ${sscc}`,"sucesso");await abrirGestorPaletizacaoR31(encomendaId,nomeCliente);});
+    gestor.querySelectorAll("[data-cancelar-palete]").forEach(b=>b.onclick=async()=>{if(!(await confirmarAcao({titulo:"Cancelar palete",mensagem:`Cancelar a palete vazia ${b.dataset.codigoPalete}?`,confirmar:"Cancelar palete"})))return;const {error}=await supabaseClient.rpc("cancelar_palete_vazia_r33441",{p_palete:b.dataset.cancelarPalete});if(error){gestor.querySelector("#plErro").textContent=traduzirErro(error.message);return;}toast("Palete cancelada.","sucesso");await abrirGestorPaletizacaoR31(encomendaId,nomeCliente);await carregar();});
 }
 
 async function carregarPorEmbalar() {
