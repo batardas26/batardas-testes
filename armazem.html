@@ -1176,12 +1176,15 @@ async function carregarPlanoEmbalamentoDoDia() {
     corpo.innerHTML = data.length ? "" : `<tr><td colspan="4" style="text-align:center; color:var(--ink-suave);">Nada planeado para este dia.</td></tr>`;
     data.forEach((item) => {
         const tr = document.createElement("tr");
-        const artigoEmPack=Number(item.lotes_internos?.artigos?.unidades_produto_por_stock)>1;
-        const decomposicao=artigoEmPack&&item.packs_previstos_r32!=null?` → ${item.packs_previstos_r32} PCK${Number(item.remanescente_previsto_un_r32)>0?` + ${item.remanescente_previsto_un_r32} UN`:""}`:"";
+        const conteudoPack=Number(item.lotes_internos?.artigos?.unidades_produto_por_stock)||1;
+        const quantidadeUn=Number(item.quantidade_planeada_un_r32??item.quantidade);
+        const packs=conteudoPack>1?Number(item.packs_previstos_r32??Math.floor(quantidadeUn/conteudoPack)):null;
+        const remanescente=conteudoPack>1?Number(item.remanescente_previsto_un_r32??(quantidadeUn-packs*conteudoPack)):null;
+        const decomposicao=packs!=null?` → ${packs} PCK${remanescente>0?` + ${remanescente} UN`:""}`:"";
         tr.innerHTML = `
             <td data-rotulo="Produto">${escaparHtml(item.lotes_internos?.artigos?.designacao ?? item.lotes_producao?.produto ?? "—")}</td>
             <td data-rotulo="Lote" class="mono">${escaparHtml(item.lotes_internos?.numero_lote ?? item.lotes_producao?.numero_lote ?? "—")}</td>
-            <td data-rotulo="Quantidade">${item.quantidade_planeada_un_r32??item.quantidade} UN${decomposicao}</td>
+            <td data-rotulo="Quantidade">${quantidadeUn} UN${decomposicao}</td>
             <td data-rotulo="Acção"><div class="linha-form"><button data-confirmar-plano="${item.id}" style="padding:6px 10px; font-size:12px;">Confirmar embalamento</button><button class="secundario" data-cancelar-plano="${item.id}" style="padding:6px 10px; font-size:12px;">Cancelar</button></div></td>
         `;
         tr.querySelector("[data-confirmar-plano]").addEventListener("click", () => abrirConfirmacaoPlanoEmbalamento(item));
