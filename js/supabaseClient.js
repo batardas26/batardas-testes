@@ -206,7 +206,12 @@ function mostrarBackendDesatualizadoR323(estado = null) {
 async function verificarBackendR323() {
     if (estadoBackendR323 === true) return true;
     const { data, error } = await supabaseClient.rpc("estado_backend_r323");
-    const valido = !error && data?.versao === VERSAO_FRONTEND
+    // A aplicação operacional R3.3-A.4.4.2 continua ativa durante a migração
+    // A.5. As versões A.5.x são extensões compatíveis do mesmo contrato e não
+    // devem ser confundidas com uma migration operacional em falta.
+    const versaoCompativel = data?.versao === VERSAO_FRONTEND
+        || /^R3\.3-A\.5(?:\.|$)/.test(String(data?.versao ?? ""));
+    const valido = !error && versaoCompativel
         && data?.stock_view === true && data?.reserva_fefo === true
         && data?.rastreabilidade_contrato === true
         && data?.entrega_pa_obrigatoria === true
